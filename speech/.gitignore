@@ -4,3 +4,4 @@ models/*.bin
 models/*.onnx
 models/*.onnx.json
 *.wav
+recordings/
