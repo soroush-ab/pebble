@@ -75,32 +75,38 @@ class TextToSpeech:
         return self._voices[name]
 
     def synthesize(self, text: str, character_id: str | None = None,
-                   extraversion: str | None = None) -> tuple[np.ndarray, int]:
-        """Return (mono float32 audio, sample_rate) for `text` in the character's voice."""
+                   extraversion: str | None = None, emotion: str | None = None) -> tuple[np.ndarray, int]:
+        """Return (mono float32 audio, sample_rate) for `text` in the character's voice.
+
+        `emotion` (LLM2's emotion output, e.g. "sad", "excited") speeds up or slows down the
+        character's normal pace according to voices.json.
+        """
         from piper import SynthesisConfig
 
         settings = voice_for(character_id, extraversion, self.voice_map)
+        length_scale = settings.length_scale * self.voice_map.get(
+            "emotion_length_scale", {}).get(emotion, 1.0)
         voice = self._load(settings.voice)
         # LLM output may contain markdown emphasis like *beep*; don't read the asterisks out.
         text = text.replace("*", "").strip()
         chunks = [c.audio_float_array for c in voice.synthesize(
-            text, SynthesisConfig(length_scale=settings.length_scale))]
+            text, SynthesisConfig(length_scale=length_scale))]
         audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
         return audio.astype(np.float32), voice.config.sample_rate
 
     def synthesize_wav(self, text: str, character_id: str | None = None,
-                       extraversion: str | None = None) -> bytes:
+                       extraversion: str | None = None, emotion: str | None = None) -> bytes:
         """Like synthesize(), but as WAV file bytes — for sending over the network or saving."""
         from audio_io import wav_bytes
 
-        return wav_bytes(*self.synthesize(text, character_id, extraversion))
+        return wav_bytes(*self.synthesize(text, character_id, extraversion, emotion))
 
     def speak(self, text: str, character_id: str | None = None,
-              extraversion: str | None = None, device=None) -> None:
+              extraversion: str | None = None, emotion: str | None = None, device=None) -> None:
         """Synthesize and play on this machine's speaker, blocking until playback finishes."""
         from audio_io import play
 
-        audio, rate = self.synthesize(text, character_id, extraversion)
+        audio, rate = self.synthesize(text, character_id, extraversion, emotion)
         play(audio, rate, device)
 
 
@@ -110,13 +116,14 @@ def main() -> None:
     parser.add_argument("--character", default=None, help="LLM1 character_id, e.g. baymax_v1")
     parser.add_argument("--extraversion", choices=["Low", "Medium", "High"],
                         help="Speed hint for characters not in voices.json")
+    parser.add_argument("--emotion", help="LLM2 emotion, e.g. sad / excited (adjusts speed)")
     parser.add_argument("--out", type=Path, help="Write a WAV file instead of playing")
     parser.add_argument("--output-device", help="Device index or name (uv run audio_io.py lists them)")
     args = parser.parse_args()
 
     tts = TextToSpeech()
     t0 = time.perf_counter()
-    audio, rate = tts.synthesize(args.text, args.character, args.extraversion)
+    audio, rate = tts.synthesize(args.text, args.character, args.extraversion, args.emotion)
     settings = voice_for(args.character, args.extraversion, tts.voice_map)
     print(f"[{settings.voice} x{settings.length_scale}: {audio.size / rate:.1f}s audio "
           f"in {time.perf_counter() - t0:.2f}s]")

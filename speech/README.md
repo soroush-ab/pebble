@@ -8,8 +8,9 @@ mic -> [STT: stt.py] -> text -> LLM2 (runtime assistant) -> reply text -> [TTS] 
 ```
 
 **Status:** STT (files / mic / network) and TTS (per-character voices) working, usable as Python
-classes or as an HTTP service. Hardware-independent: the model is picked to suit the machine,
-and the mic/speaker can be local or on another device. End-to-end demo is next.
+classes or as an HTTP service, and wired into LLM2: `voice_chat.py` runs mic -> STT -> LLM2 ->
+TTS in the active character's voice. Hardware-independent: the model is picked to suit the
+machine, and the mic/speaker can be local or on another device.
 
 ## Quick start
 
@@ -21,6 +22,47 @@ uv run stt.py --mic --save-dir recordings   # ...and keep each recording as a WA
 uv run tts.py "Lights on." --character marvin_v1   # speak in a character's voice
 uv run server.py                        # STT + TTS over HTTP on 127.0.0.1:8765
 ```
+
+## Talking to Pebble through LLM2 — `voice_chat.py`
+
+Full loop: mic -> STT -> LLM2 (role-plays the character scanned by NFC) -> reply spoken by
+Piper in that character's voice, with speed adjusted for LLM2's `emotion`.
+
+```bash
+cd speech
+# with a real OpenAI key in ../LLM2/.env (see LLM2/README.md):
+uv run --env-file ../LLM2/.env voice_chat.py --mic --tag marvin-demo-01
+
+# no key? run the stand-in model in another terminal first:
+uv run fake_openai.py
+OPENAI_BASE_URL=http://127.0.0.1:8790/v1 OPENAI_API_KEY=fake uv run voice_chat.py --mic --tag baymax-demo-01
+```
+
+`--text "..."` (repeatable) types instead of talking. This runs the real, unmodified LLM2 code
+in-process. `fake_openai.py` only mimics OpenAI's API with canned, keyword-based replies — it
+tests the plumbing, not the conversation.
+
+If LLM2 is already running as its own server (`LLM2/server.py`), send it the recognised text
+instead and speak the reply here:
+
+```bash
+uv run voice_chat.py --mic --llm2-url http://127.0.0.1:8000 --character marvin_v1 --token <PEBBLE_API_TOKEN>
+```
+
+**For LLM2's server (`LLM2/server.py`)** to speak with Piper itself, its speaker just needs
+swapping — `PiperSpeaker` implements LLM2's `Speaker.speak(text, emotion)` and takes the voice
+from `pipeline.active`:
+
+```python
+sys.path.insert(0, str(ROOT / "speech"))
+from llm2_speaker import PiperSpeaker
+
+speaker = PiperSpeaker()
+pipeline = LLM2Pipeline(settings, speaker=speaker)
+speaker.follow(pipeline)
+```
+
+(plus `piper-tts`, `numpy`, `sounddevice` in that script's dependencies).
 
 ## How to integrate (LLM pipeline, robot, Home Assistant)
 
@@ -66,6 +108,9 @@ are handled one at a time (the models aren't thread-safe), ~0.3-1s each on an M3
 | `stt.py` | `SpeechToText` class + CLI: audio file / numpy array / mic -> text |
 | `tts.py` | `TextToSpeech` class + CLI: text (+ character) -> audio / speaker / WAV |
 | `voices.json` | Which voice and speed each character uses |
+| `voice_chat.py` | Voice conversation: mic -> STT -> LLM2 -> TTS (in-process or via LLM2's HTTP API) |
+| `llm2_speaker.py` | `PiperSpeaker` — LLM2 `Speaker` that talks in the active character's voice |
+| `fake_openai.py` | Stand-in OpenAI endpoint for testing LLM2 without an API key |
 | `server.py` | HTTP service exposing STT (`POST /stt`) and TTS (`POST /tts`) |
 | `audio_io.py` | Resampling, WAV encode/decode, local mic/speaker (`uv run audio_io.py` lists devices) |
 | `models/` | whisper.cpp models and Piper voices, downloaded automatically (not committed) |
@@ -185,6 +230,10 @@ Speaking rate follows extraversion because rate is one of the main vocal cues pe
 perceive extraversion in synthetic speech; Piper has no pitch control, so voice choice + rate
 are the knobs. To change a voice, edit `voices.json` (browse voices at
 https://rhasspy.github.io/piper-samples/).
+
+**Emotion:** LLM2 also outputs an `emotion`; `emotion_length_scale` in `voices.json` multiplies
+the character's speed by it (excited 0.9 … sad 1.15, sleepy 1.25), e.g.
+`uv run tts.py "..." --character baymax_v1 --emotion sad`.
 
 Asterisks are stripped before speaking so markdown-style `*beep*` isn't read out.
 
