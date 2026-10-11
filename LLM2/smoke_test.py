@@ -16,13 +16,20 @@ import sys
 
 import httpx
 
-EMOTIONS = {"happy", "sad", "angry", "neutral", "excited", "sleepy", "worried"}
+# Russell 环形模型的标签（见 affect.py）/ Russell circumplex labels (see affect.py)
+EMOTIONS = {"neutral", "happy", "excited", "alert", "tense", "sad", "depressed", "sleepy", "calm"}
+
+
+def _unit(x) -> bool:
+    return isinstance(x, (int, float)) and -1.0 <= x <= 1.0
 
 
 def check_output(name: str, data: dict) -> bool:
     ok = (
         isinstance(data.get("tts_text"), str)
         and data["tts_text"].strip() != ""
+        and _unit(data.get("valence"))
+        and _unit(data.get("arousal"))
         and data.get("emotion") in EMOTIONS
         and isinstance(data.get("ha_actions"), list)
     )

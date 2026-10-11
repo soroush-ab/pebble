@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from character_store import StoredCharacter
-from schemas import EMOTIONS
 
 
 def build_system_prompt(char: StoredCharacter, ha_entities: dict[str, str] | None = None) -> str:
@@ -49,7 +48,14 @@ Each user message is a JSON: {{"source": "stt" | "ha_notification", "text": "...
    Output exactly ONE JSON object: no markdown, no extra text.
 2. 字段 / Fields:
    - tts_text: 机器人要说的话，简短、口语化、符合角色语气 / what the robot says: short, spoken, in character.
-   - emotion: 必须是 {EMOTIONS} 之一 / must be one of {EMOTIONS}.
+   - valence, arousal: 机器人此刻的情绪，Russell 环形模型，各为 -1 到 1 的数。
+     The robot's emotion now, on Russell's circumplex: two numbers from -1 to 1.
+     valence 效价: -1 不愉快 / unpleasant, 0 中性 / neutral, +1 愉快 / pleasant.
+     arousal 唤醒度: -1 困倦低落 / sleepy, low energy, 0 平静 / even, +1 兴奋警觉 / excited, alert.
+     例 / e.g. 兴奋 excited (0.7, 0.7); 平静满足 calm (0.5, -0.5); 紧张担心 tense, worried (-0.5, 0.6);
+     难过 sad (-0.7, -0.3); 困倦 sleepy (0.0, -0.8); 中性 neutral (0, 0).
+     按角色性格与当下情境给出，大多数回应接近中心，强烈情绪才靠近边缘。
+     Fit the character and the moment: most replies sit near the centre; only strong feelings near the edge.
    - ha_actions: 数组，每项 {{"service": "domain.service", "entity_id": "...", "data_json": "JSON 字符串 / JSON string"}}；
      不需要控制设备时返回 []。只使用上面列出的实体。
      Array of calls; return [] if no device control is needed. Only use entities listed above.

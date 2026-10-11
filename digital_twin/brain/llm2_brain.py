@@ -1,0 +1,617 @@
+# /// script
+# requires-python = ">=3.11,<3.14"
+# dependencies = ["openai>=1.40", "pydantic>=2", "httpx>=0.27", "websockets>=13",
+#                 "pywhispercpp>=1.3", "piper-tts>=1.3", "numpy", "sounddevice"]
+# ///
+"""Pebble brain: the real LLM2 pipeline (LLM2) driving the twin or robot.
+
+    python3 twin/run.py                                          # terminal 1
+    uv run --env-file ../LLM2/.env brain/llm2_brain.py       # terminal 2
+    open http://localhost:8730/   # swap shells, type an utterance
+
+Drop-in replacement for examples/brain_stub.py. It speaks docs/protocol.md, so
+it cannot tell the twin from the physical robot. LLM2 is used as-is:
+
+  shell `tag`   -> pipeline.set_active_tag(<tag of that character in LLM1's DB>)
+  `utterance`   -> pipeline.handle(source="stt")
+  LLM2 affect   -> TwinFace   -> `eyes` (valence, arousal) + `motion`
+                   (Russell circumplex; see affect_actions)
+  LLM2 tts_text -> TwinSpeaker -> `say` (+ Piper audio with --voice)
+  LLM2 HA calls -> real HomeAssistantClient (dry-run without HA_TOKEN),
+                   mirrored to the robot as `ha` so the twin logs them
+
+Voice (../speech, all local; needs PortAudio: apt install libportaudio2):
+    uv run brain/llm2_brain.py --local --mic --voice
+  --mic    the laptop mic stands in for the robot's array: hold "Hold to speak"
+           in the twin, talk, release -> whisper STT -> LLM2
+  --voice  replies are spoken by Piper in the active character's voice
+
+Home Assistant (HA_BASE_URL + HA_TOKEN in ../LLM2/.env):
+    uv run --env-file ../LLM2/.env brain/llm2_brain.py --local --ha-device
+  The robot registers as its own HA device (like the phone app): reminders
+  sent to notify.mobile_app_pebble are spoken in character, and it reports
+  its character/emotion as sensors. Controllable entities come from HA - the
+  ones exposed to voice assistants - instead of LLM2/ha_entities.json.
+
+Lines typed into this terminal are sent to LLM2 as Home Assistant
+notifications (e.g. "Medication is overdue") - the reminder use case.
+
+Local model instead of OpenAI (llama.cpp server, e.g. Gemma on :9931):
+    uv run brain/llm2_brain.py --local
+    uv run brain/llm2_brain.py --local http://127.0.0.1:8080/v1
+
+No model at all? Run the canned stand-in first:
+    python3 ../speech/fake_openai.py
+    OPENAI_BASE_URL=http://127.0.0.1:8790/v1 OPENAI_API_KEY=fake \\
+        uv run brain/llm2_brain.py
+"""
+
+import argparse
+import json
+import logging
+import os
+import queue
+import re
+import sqlite3
+import sys
+import threading
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent       # pebble/digital_twin
+log = logging.getLogger("pebble.brain")
+PEBBLE = ROOT.parent                                  # pebble/ (LLM1, LLM2, speech)
+sys.path.insert(0, str(ROOT / "twin"))
+sys.path.insert(0, str(PEBBLE / "LLM2"))
+
+import ws  # noqa: E402
+from adapters import Face, HomeAssistantClient, Speaker  # noqa: E402
+from pipeline import LLM2Pipeline, NoActiveCharacter  # noqa: E402
+from schemas import LLM2Input  # noqa: E402
+from settings import load_settings  # noqa: E402
+
+TWIN = os.environ.get("PEBBLE_TWIN", "ws://localhost:8730/brain")
+LOCAL_LLM = os.environ.get("PEBBLE_LOCAL_LLM", "http://127.0.0.1:9931/v1")
+
+# LLM2 emits a point on Russell's circumplex (valence x arousal, -1..1). The
+# eyes get the point itself (the twin draws it continuously; `expression` is the
+# nearest named preset, for firmware that only knows names). The motion is picked
+# by the octant and scaled by the point: arousal -> faster, intensity -> bigger.
+# On top of that the MCU applies the character's own scaling (characters/*.json),
+# so the same nod reads slow and large on Baymax, small and quick on R2-D2.
+OCTANT_MOTION = {
+    "neutral":   "ack_nod",
+    "happy":     "confirm_nod",
+    "calm":      "confirm_nod",
+    "excited":   "head_tilt",
+    "alert":     "head_tilt",
+    "tense":     "concern_lean",     # very unpleasant + very aroused: shake_no
+    "sad":       "concern_lean",
+    "depressed": "concern_lean",
+    "sleepy":    "settle",
+}
+EYE_PRESETS = {"neutral": (0.0, 0.0), "attentive": (0.2, 0.5), "concerned": (-0.5, 0.3),
+               "confirming": (0.7, 0.1), "sleep": (0.0, -1.0)}       # = twin/mcu.py
+
+
+def affect_actions(affect):
+    """Russell point -> (eyes message, motion message)."""
+    v, a = affect.valence, affect.arousal
+    expr = min(EYE_PRESETS, key=lambda e: (EYE_PRESETS[e][0] - v) ** 2
+               + (EYE_PRESETS[e][1] - a) ** 2)
+    motion = OCTANT_MOTION[affect.label]
+    if affect.label == "tense" and v < -0.5 and a > 0.6:
+        motion = "shake_no"
+    eyes = {"type": "eyes", "expression": expr, "valence": round(v, 3), "arousal": round(a, 3)}
+    move = {"type": "motion", "id": motion, "speed": round(1 + 0.25 * a, 3),
+            "amp": round(0.85 + 0.35 * affect.intensity, 3)}
+    return eyes, move
+
+
+class Link:
+    """The current robot connection; swapped on reconnect, None while down."""
+
+    def __init__(self):
+        self.conn = None
+
+    def send(self, msg):
+        c = self.conn
+        if c is not None and not c.closed:
+            c.send_json(msg)
+
+
+class TwinFace(Face):
+    def __init__(self, link, device=None):
+        self.link, self.device = link, device
+
+    def show_emotion(self, affect):
+        if self.device:
+            threading.Thread(target=self.device.update_sensor, daemon=True, args=(
+                "emotion", affect.label,
+                {"valence": affect.valence, "arousal": affect.arousal,
+                 "intensity": round(affect.intensity, 3), "model": "Russell circumplex"},
+            )).start()
+        for msg in affect_actions(affect):
+            self.link.send(msg)
+
+
+class TwinSpeaker(Speaker):
+    """Sends `say`; with Piper, also plays the audio and reports its real length."""
+
+    def __init__(self, link, piper=None):
+        self.link, self.piper = link, piper
+
+    def speak(self, text, affect):
+        if self.piper is None:
+            self.link.send({"type": "say", "text": text, "dur_ms": int(55 * len(text))})
+            return
+        from audio_io import play
+        character_id, extraversion = self.piper._active_voice()
+        audio, rate = self.piper.tts.synthesize(text, character_id, extraversion,
+                                                affect.arousal)
+        self.link.send({"type": "say", "text": text, "dur_ms": int(1000 * len(audio) / rate)})
+        play(audio, rate, self.piper.device)
+
+
+class TwinHA(HomeAssistantClient):
+    """LLM2's real HA client, with each accepted call mirrored to the robot."""
+
+    def __init__(self, link, settings, entities):
+        super().__init__(settings.ha_base_url, settings.ha_token,
+                         settings.ha_allowed_domains, frozenset(entities),
+                         settings.ha_timeout)
+        self.link = link
+        self.failed = 0     # calls refused or failed in the current turn
+
+    strict = False      # True: only listed entities, even when the list is empty
+    device = None       # HADevice, for ticking reminders off
+
+    def complete_reminder(self, action):
+        """The one write Pebble may make to a reminder list: mark an open item
+        completed ("I took it"). Not delete, rename, add, or reopen."""
+        try:
+            data = json.loads(action.data_json or "{}")
+        except ValueError:
+            data = {}
+        item = str(data.get("item", "")).strip()
+        # Models copy the whole reminder line ("take medication (due Sun 22:53) -
+        # note"), so match an open item on that list whose text it contains.
+        hits = [i for i in self.device.items
+                if i["done_ok"] and i["list"] == action.entity_id
+                and (i["uid"] == item or i["summary"].lower() in item.lower())]
+        hit = max(hits, key=lambda i: len(i["summary"])) if hits else None
+        if data.get("status", "completed") != "completed" or hit is None:
+            log.warning("refused reminder update: %s %s", action.entity_id, data)
+            return False
+        if self.dry_run:
+            print(f"[HA dry-run] todo.update_item {action.entity_id} "
+                  f"{hit['summary']!r} -> completed")
+        else:
+            self.device.complete_item(action.entity_id, hit["summary"])
+            print(f"[HA] reminder done: {hit['list_name']}: {hit['summary']}")
+        self.link.send({"type": "ha", "service": "todo.update_item",
+                        "data": {"entity_id": action.entity_id, "item": hit["summary"],
+                                 "status": "completed"}})
+        return True
+
+    def execute(self, action):
+        if action.service == "todo.update_item" and self.device is not None:
+            ok = self.complete_reminder(action)
+            self.failed += not ok
+            return ok
+        # Models like HA's generic homeassistant.turn_off. Map it to the entity's
+        # own domain so the domain allowlist still judges the actual device.
+        domain, _, service = action.service.partition(".")
+        if domain == "homeassistant" and "." in action.entity_id:
+            action = action.model_copy(update={
+                "service": f"{action.entity_id.split('.', 1)[0]}.{service}"})
+        if self.strict and action.entity_id not in self.allowed_entities:
+            log.warning("entity not exposed to Pebble in HA: %s", action.entity_id)
+            ok = False
+        else:
+            ok = super().execute(action)
+        if ok:
+            data = {**json.loads(action.data_json or "{}"), "entity_id": action.entity_id}
+            self.link.send({"type": "ha", "service": action.service, "data": data})
+        else:
+            self.failed += 1
+        return ok
+
+
+class MicRecorder:
+    """Records from this machine's mic between `vad` start and stop.
+
+    In the real robot the MCU streams audio from its own array; in the twin the
+    "Hold to speak" button sends the same vad messages and the laptop mic
+    supplies the audio. Same start/stop shape as pebble's record_push_to_talk,
+    but driven by the robot instead of the Enter key."""
+
+    MAX_SECONDS = 30
+
+    def __init__(self, device=None):
+        import sounddevice as sd
+        from audio_io import _device
+        self.sd, self.device = sd, _device(device)
+        self.rate = int(sd.query_devices(self.device, "input")["default_samplerate"])
+        self.stream, self.chunks = None, []
+
+    def _callback(self, indata, frames, time_info, status):
+        if sum(len(c) for c in self.chunks) < self.MAX_SECONDS * self.rate:
+            self.chunks.append(indata[:, 0].copy())
+
+    def start(self):
+        if self.stream is not None:
+            return
+        self.chunks = []
+        self.stream = self.sd.InputStream(samplerate=self.rate, channels=1, dtype="float32",
+                                          device=self.device, callback=self._callback)
+        self.stream.start()
+
+    def stop(self):
+        """Returns (audio, sample_rate), or None if not recording."""
+        if self.stream is None:
+            return None
+        self.stream.stop()
+        self.stream.close()
+        self.stream = None
+        import numpy as np
+        audio = np.concatenate(self.chunks) if self.chunks else np.zeros(0, np.float32)
+        return audio, self.rate
+
+
+def use_local_model(url):
+    """Point LLM2 at a local OpenAI-compatible server (llama.cpp `llama serve`).
+
+    LLM2 reads its endpoint from the environment, so this only has to set the
+    variables before load_settings(). The model name is whatever the server has
+    loaded, unless PEBBLE_LOCAL_MODEL says otherwise (LLM2_MODEL is ignored: in
+    LLM2/.env it names an OpenAI model)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + "/models", timeout=5) as r:
+            models = [m["id"] for m in json.load(r).get("data", [])]
+    except OSError as exc:
+        sys.exit(f"no local model server at {url} ({getattr(exc, 'reason', exc)}).\n"
+                 f"Start it first, e.g.: llama serve -hf ggml-org/gemma-4-E4B-it-GGUF:Q8_0 "
+                 f"--port 9931")
+    if not models:
+        sys.exit(f"local server {url} has no model loaded")
+    os.environ["OPENAI_BASE_URL"] = url
+    os.environ.setdefault("OPENAI_API_KEY", "local")     # llama.cpp ignores it
+    os.environ["LLM2_MODEL"] = os.environ.get("PEBBLE_LOCAL_MODEL") or models[0]
+
+
+def tune_for_local(client):
+    """Small local models (Gemma 4 E4B) open a hidden "thought" channel on their
+    own even with thinking off in the chat template: ~300 extra tokens, ~20 s
+    per turn on a laptop GPU. A zero thinking budget stops that; the token cap
+    stops a runaway reply from holding the robot hostage."""
+    create = client.chat.completions.create
+
+    def fast_create(**kw):
+        kw.setdefault("max_tokens", 400)
+        kw["extra_body"] = {"thinking_budget_tokens": 0, **(kw.get("extra_body") or {})}
+        return create(**kw)
+
+    client.chat.completions.create = fast_create
+
+
+class Pipeline(LLM2Pipeline):
+    """LLM2 with a fixed reply language. Its prompt says "reply in the user's
+    language", but the user text arrives wrapped in JSON and the prompt is half
+    Chinese, so smaller models answer in Chinese."""
+
+    reply_language = ""
+    entity_source = None        # callable -> {entity_id: description}, e.g. from HA
+
+    def _load_entities(self):
+        if self.entity_source is None:
+            return super()._load_entities()
+        try:
+            return self.entity_source()
+        except Exception as e:  # noqa: BLE001 - keep the last good list
+            log.warning("could not fetch entities from HA (%s); keeping %d known",
+                        e, len(getattr(self, "ha_entities", {})))
+            return getattr(self, "ha_entities", {})
+
+    state_source = None         # callable(entity_ids) -> {entity_id: state}
+    reminder_source = None      # callable() -> list of lines, or None if unknown
+
+    def handle(self, event):
+        """Tell the model how the home is right now. Appended to the user turn,
+        not the system prompt, so llama.cpp keeps the long prompt cached."""
+        if self.state_source and event.source == "stt" and self.ha_entities:
+            try:
+                now = self.state_source(set(self.ha_entities))
+            except Exception as e:  # noqa: BLE001 - answer without states
+                log.warning("could not read device states (%s)", e)
+                now = {}
+            if now:
+                listed = "; ".join(f"{self.ha_entities[eid]} [{eid}]: {st}"
+                                   for eid, st in now.items())
+                event = event.model_copy(update={
+                    "text": f"{event.text}\n\n(Current device states: {listed})"})
+        if self.reminder_source and event.source == "stt":
+            items = self.reminder_source()
+            if items is not None:
+                listed = "; ".join(items) if items else "none"
+                event = event.model_copy(update={
+                    "text": f"{event.text}\n(Reminders, to-do items and calendar events "
+                            f"in Home Assistant: {listed})"})
+        return super().handle(event)
+
+    def refresh_entities(self):
+        """Re-read what Pebble may control; the prompt picks it up on the next
+        set_active_tag, the HA allowlist immediately."""
+        self.ha_entities = self._load_entities()
+        self.ha.allowed_entities = frozenset(self.ha_entities)
+
+    GROUNDING = (
+        "\nFacts about the home arrive in parentheses after the user's words: current "
+        "device states and readings, and the reminders, to-do items and calendar events "
+        "in Home Assistant. They are the ONLY facts you know about the home. Never invent "
+        "a device state, reading, reminder, medication, dose or time. If the user asks "
+        "about something not listed, say Home Assistant has nothing about it. Repeat "
+        "what a reminder says (including its note) when asked, but give no medical "
+        "advice beyond it: for health worries, suggest contacting someone who can help."
+        "\nWhen the user says they have done a to-do reminder (e.g. took their "
+        "medication), tick it off with one ha_action: service \"todo.update_item\", "
+        "entity_id = the list shown in [brackets], data_json = "
+        "{\"item\": \"<the item text exactly>\", \"status\": \"completed\"}. Only "
+        "when they say it is done, never on a guess.")
+
+    def set_active_tag(self, nfc_tag_id):
+        char = super().set_active_tag(nfc_tag_id)
+        with self._lock:
+            if self.reply_language:
+                self._system_prompt += (f"\nAlways write tts_text in {self.reply_language}, "
+                                        f"in one or two short spoken sentences.")
+            if self.state_source or self.reminder_source:
+                self._system_prompt += self.GROUNDING
+        return char
+
+
+def tag_for(db_path, twin_character):
+    """Twin shells are "baymax"/"r2d2"/...; LLM1's DB keys them by NFC tag with
+    character_id "baymax_v1"... Pick the highest version of that character."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute("SELECT nfc_tag_id, character_id, version FROM characters").fetchall()
+    finally:
+        conn.close()
+    want = twin_character.lower().replace("-", "").replace("_", "")
+    hits = [r for r in rows
+            if r[1].lower().rsplit("_v", 1)[0].replace("-", "").replace("_", "") == want]
+    return max(hits, key=lambda r: r[2])[0] if hits else None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--twin", default=TWIN, help="robot/twin brain WebSocket URL")
+    ap.add_argument("--voice", action="store_true",
+                    help="speak replies with Piper in the character's voice")
+    ap.add_argument("--mic", action="store_true",
+                    help='record this machine\'s mic while "Hold to speak" is held, '
+                         "transcribe with whisper")
+    ap.add_argument("--audio-device", help="mic/speaker index or name (see "
+                                           "`python -m sounddevice`)")
+    # base.en: 0.8 s per sentence on this laptop's CPU vs 4.1 s for small.en,
+    # same transcript on clean speech. Use small.en-q5_1 for noisy rooms.
+    ap.add_argument("--stt-model", default="base.en-q5_1",
+                    help='whisper.cpp model name or .bin path ("auto" = pebble\'s pick)')
+    ap.add_argument("--local", nargs="?", const=LOCAL_LLM, metavar="URL",
+                    help=f"use a local llama.cpp model instead of OpenAI (default {LOCAL_LLM})")
+    ap.add_argument("--reply-language", default="English",
+                    help='language for spoken replies; "" keeps LLM2\'s own rule')
+    ap.add_argument("--ha-device", nargs="?", const="Pebble", metavar="NAME",
+                    help="register as a Home Assistant device (default name Pebble) "
+                         "and receive its notifications")
+    ap.add_argument("--no-reminders", action="store_true",
+                    help="don't announce HA to-do/calendar items when they fall due")
+    ap.add_argument("--ha-entities", choices=("auto", "ha", "file"), default="auto",
+                    help="where controllable entities come from: ha, file "
+                         "(LLM2/ha_entities.json), auto = ha when HA is configured")
+    args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="  %(name)s: %(message)s")
+    for noisy in ("httpx", "httpx2", "pywhispercpp.model"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    if args.local:
+        use_local_model(args.local)
+    Pipeline.reply_language = args.reply_language
+    settings = load_settings()
+    link = Link()
+
+    piper = stt = mic = None
+    if args.voice or args.mic:
+        sys.path.insert(0, str(PEBBLE / "speech"))
+    if args.voice:
+        from llm2_speaker import PiperSpeaker
+        piper = PiperSpeaker(device=args.audio_device)
+    if args.mic:
+        from stt import SpeechToText
+        mic = MicRecorder(args.audio_device)
+        print("loading whisper (first run downloads it into ../speech/models) ...")
+        stt = SpeechToText(args.stt_model, n_threads=min(8, os.cpu_count() or 1))
+        print(f"  STT {stt.model_name}, mic at {mic.rate} Hz")
+
+    device = None
+    if (args.ha_device or args.ha_entities == "ha") and settings.ha_dry_run:
+        sys.exit("--ha-device / --ha-entities ha need HA_BASE_URL and HA_TOKEN "
+                 "(see ../LLM2/.env.example)")
+    if not settings.ha_dry_run:
+        from ha_device import HADevice
+        device = HADevice(settings.ha_base_url, settings.ha_token, args.ha_device or "Pebble")
+        if args.ha_entities != "file":
+            Pipeline.entity_source = staticmethod(
+                lambda: device.entities(settings.ha_allowed_domains))
+            Pipeline.state_source = staticmethod(device.states)
+        Pipeline.reminder_source = staticmethod(lambda: device.reminders)
+    if args.ha_device:
+        device.register()
+
+    pipe = Pipeline(settings, speaker=TwinSpeaker(link, piper),
+                    face=TwinFace(link, device if args.ha_device else None),
+                    ha=TwinHA(link, settings, {}))
+    pipe.ha.allowed_entities = frozenset(pipe.ha_entities)   # loaded by __init__
+    # LLM2's client reads an empty list as "anything in the allowed domains";
+    # when HA decides what is exposed, empty must mean nothing.
+    pipe.ha.strict = Pipeline.entity_source is not None
+    pipe.ha.device = device
+    if args.local:
+        tune_for_local(pipe.client)
+    if piper:
+        piper.follow(pipe)
+
+    # LLM calls take seconds; run them off the receive loop, one at a time.
+    jobs = queue.Queue()
+
+    def worker():
+        while True:
+            source, text = jobs.get()
+            t0 = time.time()
+            try:
+                if source == "warm":                 # load the voice before it is needed
+                    piper.tts.synthesize(".", text)
+                    continue
+                if source == "mic":                  # text is (audio, rate) here
+                    text = stt.transcribe(*text)
+                    if not text:
+                        print("  (nothing heard)")
+                        link.send({"type": "eyes", "expression": "neutral"})
+                        continue
+                    print(f'  heard: "{text}"  ({(time.time() - t0) * 1000:.0f} ms STT)')
+                    link.send({"type": "heard", "text": text})
+                    source, t0 = "stt", time.time()
+                pipe.ha.failed = 0
+                out = pipe.handle(LLM2Input(source=source, text=text))
+                print(f"  -> [{out.affect}] {(time.time() - t0) * 1000:.0f} ms  "
+                      f"\"{out.tts_text[:60]}\"  ha={len(out.ha_actions)}"
+                      + (f" ({pipe.ha.failed} FAILED)" if pipe.ha.failed else ""))
+                if pipe.ha.failed:              # it may have said "done"; show it wasn't
+                    link.send({"type": "eyes", "expression": "concerned"})
+                    link.send({"type": "motion", "id": "shake_no"})
+            except NoActiveCharacter:
+                print("  no character active yet - fit a shell")
+            except Exception as exc:  # noqa: BLE001 - never kill the brain
+                print(f"  LLM2 failed: {exc}")
+                link.send({"type": "eyes", "expression": "concerned"})
+                link.send({"type": "motion", "id": "shake_no"})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def notifications():
+        for line in sys.stdin:
+            if line.strip():
+                jobs.put(("ha_notification", line.strip()))
+
+    if sys.stdin.isatty():
+        threading.Thread(target=notifications, daemon=True).start()
+
+    if device is not None:
+        def on_due(item, times):
+            """A reminder fell due: Pebble speaks first, nobody has to ask."""
+            note = f" ({item['note']})" if item["note"] else ""
+            lead = ("Reminder due now" if times == 0 else
+                    f"Reminder still not done (reminded {times} time"
+                    f"{'s' if times > 1 else ''} already)")
+            text = f"{lead}: {item['summary']}{note}."
+            print(f'  reminder due: "{text}"')
+            jobs.put(("ha_notification", text))
+        device.watch_reminders(on_due=on_due if not args.no_reminders else None)
+
+    if args.ha_device:
+        def on_push(message, title, data):
+            text = f"{title}: {message}" if title else message
+            print(f'  HA notification: "{text}"')
+            jobs.put(("ha_notification", text))
+        device.listen(on_push)
+
+    def prime_stt():
+        """Whisper mishears names it has never seen ("disc light", "sushi man").
+        Prime it with the home's own device and room names."""
+        if stt is None or not pipe.ha_entities:
+            return
+        # "soshi desk (Bedroom)" -> device "soshi desk", room "Bedroom". Hyphens
+        # out: primed with "soshi-room", whisper wrote "is soshi-room" as "isshi-room".
+        names, rooms = set(), set()
+        for desc in pipe.ha_entities.values():
+            m = re.match(r"(.*?)\s*\(([^)]*)\)\s*$", desc)
+            name, room = (m.group(1), m.group(2)) if m else (desc, None)
+            names.add(" ".join(re.sub(r"[^\w&']", " ", name).split()))
+            if room:
+                rooms.add(room)
+        prompt = "Talking to Pebble, a home robot. Devices: " + ", ".join(sorted(names)) + "."
+        if rooms:
+            prompt += " Rooms: " + ", ".join(sorted(rooms)) + "."
+        stt._model._set_params({"initial_prompt": prompt})
+        log.info("STT primed: %s", prompt)
+
+    prime_stt()
+
+    def select(character):
+        if not character:
+            return
+        tag = tag_for(settings.db_path, character)
+        if tag is None:
+            print(f"  no LLM1 profile for shell {character!r} - "
+                  f"run ../LLM1/seed_characters.py or character_generator.py")
+            return
+        if Pipeline.entity_source:
+            pipe.refresh_entities()             # pick up devices added in HA
+            prime_stt()
+        c = pipe.set_active_tag(tag)
+        print(f"  shell {character} -> {c.profile.display_name} ({tag}, v{c.version})")
+        if args.ha_device:
+            device.update_sensor("character", c.profile.display_name)
+        if piper:
+            jobs.put(("warm", c.character_id))
+
+    print(f"LLM2 model {settings.openai_model} · db {settings.db_path} · "
+          f"HA {'dry-run' if settings.ha_dry_run else settings.ha_base_url} · "
+          f"{len(pipe.ha_entities)} entities"
+          + (f" · notify via {device.notify_service}" if args.ha_device else ""))
+    print(f"connecting to {args.twin} ... (type a line here to send an HA notification)")
+    while True:
+        try:
+            conn = ws.connect(args.twin)
+        except OSError as exc:
+            print(f"  robot not up ({exc}); retrying in 2 s")
+            time.sleep(2)
+            continue
+        link.conn = conn
+        try:
+            while True:
+                msg = conn.recv_json()
+                if not msg:
+                    continue
+                kind = msg.get("type")
+                if kind == "hello":
+                    print(f"connected: fw={msg['fw']}  shell={msg.get('character_id')}")
+                    select(msg.get("character_id"))
+                elif kind == "tag" and msg.get("present"):
+                    select(msg.get("character_id"))
+                elif kind == "utterance":
+                    print(f'  heard: "{msg.get("text", "")}"')
+                    # look like we're listening while the LLM thinks
+                    link.send({"type": "eyes", "expression": "attentive"})
+                    jobs.put(("stt", msg.get("text", "")))
+                elif kind == "vad" and msg.get("speaking"):
+                    link.send({"type": "eyes", "expression": "attentive"})
+                    if mic:
+                        mic.start()
+                elif kind == "vad" and mic:
+                    rec = mic.stop()
+                    if rec is not None:
+                        jobs.put(("mic", rec))
+        except (ws.WSClosed, ConnectionError, OSError):
+            link.conn = None
+            print("robot disconnected; reconnecting")
+            time.sleep(1.5)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()

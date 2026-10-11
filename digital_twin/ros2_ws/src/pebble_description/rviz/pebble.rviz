@@ -1,0 +1,80 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /RobotModel1
+      Splitter Ratio: 0.5
+    Tree Height: 640
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.05
+      Plane Cell Count: 20
+      Color: 40; 46; 54
+      Line Style:
+        Value: Lines
+      Reference Frame: base_footprint
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+      TF Prefix: ""
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Marker Scale: 0.06
+      Show Axes: true
+      Show Arrows: false
+      Show Names: true
+      Frame Timeout: 15
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Eyes
+      Enabled: true
+      Topic:
+        Value: /pebble/eye_markers
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Namespaces:
+        {}
+  Global Options:
+    Background Color: 13; 17; 23
+    Fixed Frame: base_footprint
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 0.68
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0.13
+      Pitch: 0.18
+      Yaw: 1.67
+      Near Clip Distance: 0.01
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Width: 1500
+  Hide Left Dock: false
+  Hide Right Dock: true

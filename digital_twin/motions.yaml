@@ -1,0 +1,141 @@
+# Pebble shared motion library.
+#
+# ONE definition consumed by BOTH the digital twin and the MCU firmware.
+#
+# Channels, matching the CAD (config/robot.yaml):
+#   base_yaw    stepper on the lazy susan. The ONLY yaw the robot has.
+#   head_pitch  gimbal axis 1. negative = nose down.
+#   head_roll   gimbal axis 2. positive = top of head toward +y.
+#
+# There is no head yaw/pan. The neck is a parallel pushrod mechanism, so these
+# are HEAD POSE channels; twin/linkage.py converts them to the two MG995 servo
+# angles exactly as the firmware will. Author poses here, never servo angles.
+#
+# Keyframes: t in seconds, pos in degrees, relative to the pose at motion start
+#            unless `absolute: true`.
+# Easing:    linear | ease_in | ease_out | ease_in_out | s_curve
+#
+# Per-character variation is NOT done by writing new motions. It is done by the
+# character's motion_profile (speed_scale / amplitude_scale / settle_ms), which
+# scales these same keyframes. See characters/*.json.
+
+defaults:
+  easing: ease_in_out
+
+motions:
+
+  idle_breathe:
+    description: Slow ambient presence. Loops whenever nothing else is running.
+    loop: true
+    channels:
+      head_pitch:
+        - {t: 0.0, pos: 0.0}
+        - {t: 2.0, pos: 1.5}
+        - {t: 4.0, pos: 0.0}
+    easing: s_curve
+
+  attend:
+    description: Orient toward the speaker. Yaw is stepper-only; the head adds
+      an anticipatory roll while the base catches up. Generated at runtime.
+    parametric: true
+    channels: [base_yaw, head_pitch, head_roll]
+
+  ack_nod:
+    description: Single acknowledgement nod. "I heard you."
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.22, pos: -10.0}
+        - {t: 0.48, pos:   0.0}
+
+  confirm_nod:
+    description: Double nod after completing an action.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:  0.0}
+        - {t: 0.20, pos: -8.0}
+        - {t: 0.38, pos: -1.0}
+        - {t: 0.56, pos: -8.0}
+        - {t: 0.80, pos:  0.0}
+
+  head_tilt:
+    description: Curiosity tilt - a true ROLL, which the parallel gimbal does
+      natively. R2-D2's signature beat and the most expressive move the
+      mechanism has.
+    channels:
+      head_roll:
+        - {t: 0.00, pos:  0.0}
+        - {t: 0.28, pos: 14.0}
+        - {t: 1.10, pos: 14.0}
+        - {t: 1.45, pos:  0.0}
+      head_pitch:
+        - {t: 0.00, pos: 0.0}
+        - {t: 0.28, pos: 4.0}
+        - {t: 1.10, pos: 4.0}
+        - {t: 1.45, pos: 0.0}
+
+  concern_lean:
+    description: Lean in on a wellbeing check-in. Baymax's proactive beat.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:  0.0}
+        - {t: 0.70, pos: -6.0}
+        - {t: 2.00, pos: -6.0}
+        - {t: 2.80, pos:  0.0}
+    easing: s_curve
+
+  shake_no:
+    description: Negative / cannot comply. The robot has no head yaw, so "no"
+      is a roll wobble rather than a side-to-side shake. Verify this reads as
+      refusal in the user study - it is the one gesture the mechanism cannot
+      render conventionally.
+    channels:
+      head_roll:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.18, pos: -11.0}
+        - {t: 0.40, pos:  11.0}
+        - {t: 0.62, pos:  -6.0}
+        - {t: 0.85, pos:   0.0}
+
+  scan_room:
+    description: Sweep when the speaker cannot be localised. Uses the BASE,
+      because there is no head yaw. Slow and audible - use sparingly.
+    channels:
+      base_yaw:
+        - {t: 0.0, pos:   0.0}
+        - {t: 2.2, pos: -35.0}
+        - {t: 5.6, pos:  35.0}
+        - {t: 7.6, pos:   0.0}
+      head_pitch:
+        - {t: 0.0, pos: 0.0}
+        - {t: 1.0, pos: 3.0}
+        - {t: 6.6, pos: 3.0}
+        - {t: 7.6, pos: 0.0}
+    easing: ease_in_out
+
+  settle:
+    description: Return to neutral. Played on character swap and after actions.
+    channels:
+      head_pitch: [{t: 0.0, pos: 0.0, absolute: true}]
+      head_roll:  [{t: 0.0, pos: 0.0, absolute: true}]
+
+  wake:
+    description: Shell attached, personality loaded. First sign of life.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos: -3.0}
+        - {t: 0.45, pos:  6.0}
+        - {t: 1.00, pos:  0.0}
+      head_roll:
+        - {t: 0.00, pos: 0.0}
+        - {t: 0.45, pos: 5.0}
+        - {t: 1.00, pos: 0.0}
+    easing: ease_out
+
+  sleep:
+    description: Power-down / dormant pose.
+    channels:
+      head_pitch:
+        - {t: 0.0, pos:   0.0}
+        - {t: 1.4, pos: -16.0, absolute: true}
+    easing: ease_in

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
-# 机器人可表达的情绪 / Emotions the robot can express
-Emotion = Literal["happy", "sad", "angry", "neutral", "excited", "sleepy", "worried"]
-EMOTIONS: list[str] = list(Emotion.__args__)  # type: ignore[attr-defined]
+from affect import Affect
 
 # 输入来源：用户语音转文字 或 Home Assistant 通知
 # Input source: user speech-to-text or a Home Assistant notification
@@ -30,8 +28,25 @@ class HAAction(BaseModel):
 
 class LLM2Output(BaseModel):
     tts_text: str  # 扬声器播报文本 / text for the speaker (TTS)
-    emotion: Emotion  # 屏幕/舵机情绪 / emotion for display & servos
+    # Russell 环形模型 / Russell circumplex: 屏幕、舵机和语速都由它驱动
+    # drives the eyes, the motions and the speaking rate
+    valence: float = 0.0  # -1 不愉快 / unpleasant .. +1 愉快 / pleasant
+    arousal: float = 0.0  # -1 低落困倦 / deactivated .. +1 激动警觉 / activated
     ha_actions: list[HAAction] = Field(default_factory=list)  # HA 调用 / HA calls
+
+    @field_validator("valence", "arousal")
+    @classmethod
+    def _clamp(cls, v: float) -> float:
+        return max(-1.0, min(1.0, v))
+
+    @property
+    def affect(self) -> Affect:
+        return Affect(self.valence, self.arousal)
+
+    @computed_field  # 由坐标推出的标签，便于日志和显示 / label derived from the point
+    @property
+    def emotion(self) -> str:
+        return self.affect.label
 
 
 # 传给 OpenAI 的严格 JSON Schema（必须与上面的模型保持一致）
@@ -40,7 +55,14 @@ OUTPUT_JSON_SCHEMA: dict = {
     "type": "object",
     "properties": {
         "tts_text": {"type": "string"},
-        "emotion": {"type": "string", "enum": EMOTIONS},
+        "valence": {
+            "type": "number",
+            "description": "-1 unpleasant .. 0 neutral .. +1 pleasant (Russell circumplex)",
+        },
+        "arousal": {
+            "type": "number",
+            "description": "-1 sleepy/deactivated .. 0 .. +1 excited/alert (Russell circumplex)",
+        },
         "ha_actions": {
             "type": "array",
             "items": {
@@ -55,6 +77,6 @@ OUTPUT_JSON_SCHEMA: dict = {
             },
         },
     },
-    "required": ["tts_text", "emotion", "ha_actions"],
+    "required": ["tts_text", "valence", "arousal", "ha_actions"],
     "additionalProperties": False,
 }

@@ -115,8 +115,8 @@ class LLM2Pipeline:
         # 每个硬件独立 try，一个坏了不影响其他
         # Each sink is isolated so one failure does not affect the others
         for name, fn in (
-            ("face", lambda: self.face.show_emotion(out.emotion)),
-            ("speaker", lambda: self.speaker.speak(out.tts_text, out.emotion)),
+            ("face", lambda: self.face.show_emotion(out.affect)),
+            ("speaker", lambda: self.speaker.speak(out.tts_text, out.affect)),
         ):
             try:
                 fn()

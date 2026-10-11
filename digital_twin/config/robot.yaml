@@ -1,0 +1,79 @@
+# Pebble physical definition.
+#
+# Joint axes, origins, servo limits and meshes are DERIVED FROM THE CAD:
+#   python3 tools/bake_urdf.py ~/Downloads/Assembly/assembly_1
+# which writes config/urdf_derived.json and twin/web/meshes/*.stl.
+# Re-run it whenever the Fusion model changes; do not hand-edit those outputs.
+#
+# IMPORTANT - the neck is a PARALLEL mechanism, not a serial pan/tilt:
+#   * base_yaw   NEMA17 stepper on the lazy susan (URDF revolute_1)
+#   * head_pitch gimbal axis 1 (URDF revolute_2)
+#   * head_roll  gimbal axis 2 (URDF revolute_4)
+# Pitch and roll are NOT driven directly. Two MG995 servos (URDF revolute_5/6)
+# rotate about the SAME axis and push two rods onto the head plate:
+#   both servos together  -> pitch        servos opposed -> roll
+# There is NO head yaw. All yaw comes from the stepper. See linkage.yaml below.
+
+name: pebble
+cad: assembly_1
+
+dimensions:                 # metres, measured from the CAD bounding box
+  overall_w: 0.182
+  overall_d: 0.182
+  overall_h: 0.260
+  eye_radius: 0.0157        # GC9A01 1.28" active area
+  eye_separation: 0.048     # CAD contains ONE display; second is mirrored
+
+joints:
+  base_yaw:                 # NEMA17 + TMC2209, open-loop, homed at boot
+    urdf: revolute_1
+    type: stepper
+    min_deg: -170.0         # software limit; see BUILD.md wire-twist risk
+    max_deg:  170.0
+    max_vel_dps: 90.0       # stepper, deliberately slow and quiet
+    max_acc_dps2: 180.0
+    steps_per_rev: 200
+    microsteps: 16
+    gear_ratio: 1.0
+
+  head_pitch:               # gimbal axis 1, via the pushrod linkage
+    urdf: revolute_2
+    type: parallel
+    min_deg: -22.0          # nod down
+    max_deg:  22.0          # look up
+    max_vel_dps: 180.0
+    max_acc_dps2: 700.0
+
+  head_roll:                # gimbal axis 2, via the pushrod linkage
+    urdf: revolute_4
+    type: parallel
+    min_deg: -25.0
+    max_deg:  25.0
+    max_vel_dps: 200.0
+    max_acc_dps2: 800.0
+
+linkage:
+  # Differential pushrod geometry, from the CAD ball-joint positions:
+  #   both rods attach at x = +0.0456 m from the gimbal  -> pitch lever arm
+  #   rods are separated by 0.049 m in y, so +/-0.0245 m -> roll lever arm
+  # Small-angle model:  servo = k_pitch*pitch +/- k_roll*roll
+  # ESTIMATES. Calibrate against the built mechanism before trusting the
+  # validator's servo-range output - see tools/calibrate_linkage.md.
+  pitch_arm_m: 0.0456
+  roll_arm_m:  0.0245
+  horn_radius_m: 0.0205     # MG995 horn, measured axis -> ball centre
+  servo_a:                  # URDF revolute_5
+    min_deg: -87.7
+    max_deg:  92.3
+  servo_b:                  # URDF revolute_6
+    min_deg: -82.3
+    max_deg:  97.7
+
+mic_array:                  # 3 mics, equilateral, body-mounted. See BUILD.md 2.1
+  radius_m: 0.058           # circumradius -> side = r*sqrt(3) = 0.100 m
+  height_m: 0.095
+  sample_rate_hz: 48000
+  mount_angles_deg: [90.0, 210.0, 330.0]
+
+control:
+  tick_hz: 50               # motion interpolator rate; matches firmware target

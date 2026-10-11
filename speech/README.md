@@ -26,7 +26,7 @@ uv run server.py                        # STT + TTS over HTTP on 127.0.0.1:8765
 ## Talking to Pebble through LLM2 — `voice_chat.py`
 
 Full loop: mic -> STT -> LLM2 (role-plays the character scanned by NFC) -> reply spoken by
-Piper in that character's voice, with speed adjusted for LLM2's `emotion`.
+Piper in that character's voice, with speed adjusted for LLM2's arousal (Russell circumplex).
 
 ```bash
 cd speech
@@ -50,7 +50,7 @@ uv run voice_chat.py --mic --llm2-url http://127.0.0.1:8000 --character marvin_v
 ```
 
 **For LLM2's server (`LLM2/server.py`)** to speak with Piper itself, its speaker just needs
-swapping — `PiperSpeaker` implements LLM2's `Speaker.speak(text, emotion)` and takes the voice
+swapping — `PiperSpeaker` implements LLM2's `Speaker.speak(text, affect)` and takes the voice
 from `pipeline.active`:
 
 ```python
@@ -231,9 +231,11 @@ perceive extraversion in synthetic speech; Piper has no pitch control, so voice 
 are the knobs. To change a voice, edit `voices.json` (browse voices at
 https://rhasspy.github.io/piper-samples/).
 
-**Emotion:** LLM2 also outputs an `emotion`; `emotion_length_scale` in `voices.json` multiplies
-the character's speed by it (excited 0.9 … sad 1.15, sleepy 1.25), e.g.
-`uv run tts.py "..." --character baymax_v1 --emotion sad`.
+**Emotion:** LLM2 outputs its emotion on Russell's circumplex (valence × arousal, each -1..1).
+Arousal sets the pace: `arousal_rate` in `voices.json` (0.2) makes length scale
+`× (1 − 0.2·arousal)`, so excited (+1) speaks 20% faster and sleepy (−1) 20% slower,
+since speech rate is a primary vocal cue of arousal. e.g.
+`uv run tts.py "..." --character baymax_v1 --arousal -0.6`.
 
 Asterisks are stripped before speaking so markdown-style `*beep*` isn't read out.
 

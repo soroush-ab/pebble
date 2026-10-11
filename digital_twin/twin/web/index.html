@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pebble Digital Twin</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#262d36; --fg:#e6edf3;
+    --dim:#8b949e; --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--fg);
+       font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex}
+
+  #stage{flex:1;position:relative;min-width:0}
+  #stage canvas{display:block}
+  #hud{position:absolute;top:12px;left:14px;font:11px/1.6 var(--mono);
+       color:var(--dim);pointer-events:none;text-shadow:0 1px 3px #000}
+  #hud b{color:var(--fg);font-weight:600}
+  #hint{position:absolute;bottom:12px;left:14px;font:11px var(--mono);color:#4d5560}
+
+  aside{width:328px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+        overflow-y:auto;padding:14px 16px 28px}
+  h1{font-size:14px;margin:0 0 2px;letter-spacing:.2px}
+  .sub{color:var(--dim);font-size:11px;margin-bottom:14px;font-family:var(--mono)}
+  section{border-top:1px solid var(--line);padding:13px 0 4px}
+  h2{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+     color:var(--dim);margin:0 0 9px;font-weight:600}
+
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .row label{width:58px;color:var(--dim);font-size:11px;flex:none}
+  .row output{width:52px;text-align:right;font-family:var(--mono);font-size:11px;flex:none}
+  input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .grid.three{grid-template-columns:repeat(3,1fr)}
+  button{background:#21262d;color:var(--fg);border:1px solid var(--line);
+         border-radius:6px;padding:6px 8px;font:11px/1.2 inherit;cursor:pointer;
+         transition:background .12s,border-color .12s}
+  button:hover{background:#2a3038;border-color:#3d444d}
+  button.on{background:var(--accent);border-color:var(--accent);color:#04111f;font-weight:600}
+  button.wide{grid-column:1/-1}
+  button.rec{border-color:var(--bad);color:#ffb4ae}
+  button.rec.on{background:var(--bad);border-color:var(--bad);color:#2b0806}
+
+  .kv{display:flex;justify-content:space-between;font-family:var(--mono);
+      font-size:11px;padding:2.5px 0;color:var(--dim)}
+  .kv b{color:var(--fg);font-weight:500}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+       background:var(--bad);margin-right:6px;vertical-align:1px}
+  .dot.up{background:var(--ok)}
+
+  input[type=text]{width:100%;background:#0d1117;border:1px solid var(--line);
+    border-radius:6px;color:var(--fg);padding:6px 8px;font:11px var(--mono)}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+
+  #log{font:10.5px/1.55 var(--mono);max-height:168px;overflow-y:auto;
+       background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:7px 8px}
+  #log div{display:flex;gap:7px;padding:1px 0}
+  #log .k{color:var(--accent);flex:none;width:52px}
+  #log .m{color:var(--dim);word-break:break-word;min-width:0}
+  #log .k.ha{color:var(--warn)} #log .k.user{color:var(--ok)}
+  #log .k.say{color:#d2a8ff} #log .k.shell{color:#ff9e64}
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="hud"></div>
+    <div id="hint">drag to orbit &middot; scroll to zoom &middot; drag the ring marker to move the speaker</div>
+  </div>
+
+  <aside>
+    <h1>Pebble Digital Twin</h1>
+    <div class="sub" id="fw">connecting&hellip;</div>
+
+    <section>
+      <h2>Shell &mdash; RFID</h2>
+      <div class="grid three" id="shells"></div>
+      <div class="kv" style="margin-top:8px"><span>swap time</span><b id="swapms">&mdash;</b></div>
+      <div class="kv"><span>lead roll</span><b id="neckfirst">&mdash;</b></div>
+      <div class="kv"><span>speed &times; amp</span><b id="profscale">&mdash;</b></div>
+    </section>
+
+    <section>
+      <h2>Speaker &mdash; 3-mic array</h2>
+      <div class="row"><label>bearing</label>
+        <input type="range" id="sdeg" min="-180" max="180" step="1" value="35">
+        <output id="sdegv">35&deg;</output></div>
+      <div class="row"><label>distance</label>
+        <input type="range" id="sdist" min="0.5" max="4" step="0.1" value="2">
+        <output id="sdistv">2.0 m</output></div>
+      <div class="grid">
+        <button id="talk" class="rec">Hold to speak</button>
+        <button id="home">Face forward</button>
+      </div>
+      <div class="kv" style="margin-top:8px"><span>measured</span><b id="meas">&mdash;</b></div>
+      <div class="kv"><span>error</span><b id="err">&mdash;</b></div>
+    </section>
+
+    <section>
+      <h2>Motions</h2>
+      <div class="grid" id="motions"></div>
+    </section>
+
+    <section>
+      <h2>Eyes</h2>
+      <div class="grid three" id="exprs"></div>
+    </section>
+
+    <section>
+      <h2>Utterance &rarr; brain</h2>
+      <input type="text" id="utter" placeholder="Turn on the lights, I can&rsquo;t sleep">
+    </section>
+
+    <section>
+      <h2>State</h2>
+      <div class="kv"><span>base yaw</span><b id="j0">&mdash;</b></div>
+      <div class="kv"><span>head pitch</span><b id="j1">&mdash;</b></div>
+      <div class="kv"><span>head roll</span><b id="j2">&mdash;</b></div>
+      <div class="kv"><span>servo a / b</span><b id="sv">&mdash;</b></div>
+      <div class="kv"><span>brain</span><b id="brain"><span class="dot"></span>waiting</b></div>
+    </section>
+
+    <section>
+      <h2>Event log</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+
+  <script>
+    // test hook for tools/shot.py: capture load-time failures the module
+    // itself cannot report, before anything else executes
+    window.__errors = [];
+    addEventListener('error', e => window.__errors.push(
+      String(e.message || e.error) + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)));
+    addEventListener('unhandledrejection', e => window.__errors.push(
+      'unhandled rejection: ' + String(e.reason)));
+  </script>
+  <script type="importmap">
+    {"imports":{"three":"./three.module.js"}}
+  </script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-character TTS voice. Keys are LLM1 character_id values. voice = Piper voice name (https://huggingface.co/rhasspy/piper-voices), downloaded into models/ on first use. length_scale > 1 speaks slower, < 1 faster. Characters not listed here use 'default', with speed adjusted by their OCEAN extraversion if given. emotion_length_scale multiplies the speed for LLM2's emotion output (unknown emotions = 1.0).",
+  "_comment": "Per-character TTS voice. Keys are LLM1 character_id values. voice = Piper voice name (https://huggingface.co/rhasspy/piper-voices), downloaded into models/ on first use. length_scale > 1 speaks slower, < 1 faster. Characters not listed here use 'default', with speed adjusted by their OCEAN extraversion if given. arousal_rate: LLM2's Russell-circumplex arousal (-1 sleepy .. +1 excited) scales the pace: length_scale x (1 - arousal_rate x arousal).",
   "default": {
     "voice": "en_US-lessac-medium",
     "length_scale": 1.0
@@ -23,13 +23,5 @@
     "Medium": 1.0,
     "High": 0.9
   },
-  "emotion_length_scale": {
-    "excited": 0.9,
-    "happy": 0.95,
-    "angry": 0.95,
-    "neutral": 1.0,
-    "worried": 1.05,
-    "sad": 1.15,
-    "sleepy": 1.25
-  }
+  "arousal_rate": 0.2
 }

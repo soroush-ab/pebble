@@ -5,6 +5,12 @@
 Reads the character produced by LLM1, role-plays it, handles user speech (STT) and Home
 Assistant notifications, and outputs speaker text, an emotion, and Home Assistant calls.
 
+情绪采用 Russell 环形模型：效价 × 唤醒度，各为 -1..1（`affect.py`）。
+Emotion follows Russell's circumplex model: valence × arousal, each -1..1 (`affect.py`);
+a label (happy, excited, alert, tense, sad, depressed, sleepy, calm, neutral) is derived
+from the point's angle. Russell, J. A. (1980). A circumplex model of affect. *Journal of
+Personality and Social Psychology, 39*(6), 1161–1178.
+
 ## 数据流 / Data flow
 
 ```
@@ -24,6 +30,7 @@ STT / HA notification ──► prompt_builder ──► OpenAI (strict JSON) �
 |---|---|
 | `settings.py` | 环境变量配置 / env-based settings |
 | `schemas.py` | 输入输出结构与 JSON Schema / I/O models and JSON Schema |
+| `affect.py` | Russell 环形情绪模型 / Russell circumplex emotion model |
 | `character_store.py` | 按 `nfc_tag_id` 读库（只读）/ read-only DB lookup |
 | `prompt_builder.py` | 角色 JSON → System Prompt / character JSON → system prompt |
 | `adapters.py` | 扬声器、屏幕舵机接口 + HA REST 客户端 / speaker, face interfaces + HA REST client |
@@ -134,7 +141,7 @@ pipe = LLM2Pipeline(settings, speaker=MySpeaker(), face=MyServoFace())
 | 4 | NFC 读卡驱动 / NFC reader driver | 读到标签后 `POST /nfc {"nfc_tag_id": ...}`。本目录未包含。 / After a scan, `POST /nfc {"nfc_tag_id": ...}`. Not included here. |
 | 5 | STT 驱动 / STT driver | 识别出文字后 `POST /stt {"text": ...}`。本目录未包含。 / After recognition, `POST /stt {"text": ...}`. Not included here. |
 | 6 | TTS 与扬声器 / TTS and speaker | 实现 `Speaker.speak()` 替换 `ConsoleSpeaker`。 / Implement `Speaker.speak()` to replace `ConsoleSpeaker`. |
-| 7 | 屏幕与舵机 / Screen and servos | 实现 `Face.show_emotion()` 替换 `ConsoleFace`，并建立 emotion→舵机角度映射表。 / Implement `Face.show_emotion()` to replace `ConsoleFace`, with an emotion→servo-angle table. |
+| 7 | 屏幕与舵机 / Screen and servos | 实现 `Face.show_emotion(affect)` 替换 `ConsoleFace`，把效价/唤醒度映射到屏幕和舵机。 / Implement `Face.show_emotion(affect)` to replace `ConsoleFace`, mapping valence/arousal to the screens and servos (see `digital_twin/brain/llm2_brain.py`). |
 | 8 | HA 通知回路 / HA notification path | 按上文 `rest_command` 配置，并确认机器人 IP 对 HA 可达。 / Configure `rest_command` as above and make sure the robot IP is reachable from HA. |
 | 9 | 网络安全 / Network security | 设置 `PEBBLE_API_TOKEN`；服务只在局域网暴露，不要映射到公网；必要时 `SERVER_HOST=127.0.0.1`。 / Set `PEBBLE_API_TOKEN`; keep the server on the LAN only; use `SERVER_HOST=127.0.0.1` if all clients are local. |
 | 10 | 进程常驻 / Run as a service | 用 systemd 或 Docker 让 `server.py` 开机自启、崩溃重启。 / Use systemd or Docker so `server.py` starts on boot and restarts on crash. |

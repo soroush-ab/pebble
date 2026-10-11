@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 
 import httpx
 
+from affect import Affect
 from schemas import HAAction
 
 log = logging.getLogger("pebble.adapters")
@@ -22,38 +23,40 @@ log = logging.getLogger("pebble.adapters")
 # ---------------- 扬声器 / Speaker ----------------
 class Speaker(ABC):
     @abstractmethod
-    def speak(self, text: str, emotion: str) -> None:
-        """播放语音；emotion 可用来调语速/音色。
-        Play speech; `emotion` may be used to tune rate/voice."""
+    def speak(self, text: str, affect: Affect) -> None:
+        """播放语音；affect（效价、唤醒度）可用来调语速/音色。
+        Play speech; `affect` (valence, arousal) may tune rate/voice."""
 
 
 class ConsoleSpeaker(Speaker):
-    def speak(self, text: str, emotion: str) -> None:
-        print(f"[SPEAKER/{emotion}] {text}")
+    def speak(self, text: str, affect: Affect) -> None:
+        print(f"[SPEAKER/{affect.label}] {text}")
 
 
 # 真机示例 / Real-hardware sketch:
 # class Pyttsx3Speaker(Speaker):
 #     def __init__(self): import pyttsx3; self.e = pyttsx3.init()
-#     def speak(self, text, emotion): self.e.say(text); self.e.runAndWait()
+#     def speak(self, text, affect): self.e.say(text); self.e.runAndWait()
 
 
 # ---------------- 屏幕 + 舵机 / Display + servos ----------------
 class Face(ABC):
     @abstractmethod
-    def show_emotion(self, emotion: str) -> None:
-        """切换屏幕表情并驱动舵机。/ Switch the screen expression and drive servos."""
+    def show_emotion(self, affect: Affect) -> None:
+        """按 Russell 坐标切换屏幕表情并驱动舵机。
+        Show the affect (Russell valence x arousal) on the screens and servos."""
 
 
 class ConsoleFace(Face):
-    def show_emotion(self, emotion: str) -> None:
-        print(f"[FACE] {emotion}")
+    def show_emotion(self, affect: Affect) -> None:
+        print(f"[FACE] {affect}")
 
 
 # 真机示例 / Real-hardware sketch:
 # class ServoFace(Face):
-#     ANGLES = {"happy": 100, "sad": 60, "angry": 80, "neutral": 90}
-#     def show_emotion(self, emotion): servo.angle = self.ANGLES.get(emotion, 90); screen.draw(emotion)
+#     def show_emotion(self, affect):
+#         servo.angle = 90 + 15 * affect.valence      # head up when pleasant
+#         screen.draw(openness=0.5 + 0.5 * affect.arousal, smile=affect.valence)
 
 
 # ---------------- Home Assistant（真实 REST）/ Home Assistant (real REST) ----------------

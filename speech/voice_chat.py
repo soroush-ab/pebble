@@ -89,7 +89,8 @@ def over_http(args, stt) -> None:
         except urllib.error.URLError as e:
             sys.exit(f"Can't reach LLM2 at {args.llm2_url}: {e.reason}")
         print(f"[{out['emotion']}, {time.perf_counter() - t0:.2f}s LLM] {out['tts_text']}")
-        tts.speak(out["tts_text"], args.character, emotion=out["emotion"], device=args.output_device)
+        tts.speak(out["tts_text"], args.character, arousal=out.get("arousal"),
+                  device=args.output_device)
 
 
 def main() -> None:

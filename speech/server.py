@@ -12,8 +12,8 @@ pipeline (any language) then call it, and the mic/speaker can live anywhere.
 
     POST /stt   body: an audio file (WAV at any rate; mp3/m4a/... needs ffmpeg)
                 -> {"text": "..."}             ("" = no speech)
-    POST /tts   body: {"text": "...", "character_id": "marvin_v1", "emotion": "happy"}
-                (character_id / extraversion / emotion optional) -> audio/wav
+    POST /tts   body: {"text": "...", "character_id": "marvin_v1", "arousal": 0.5}
+                (character_id / extraversion / arousal optional) -> audio/wav
     GET  /health -> {"stt_model": "...", "characters": [...]}
 
 See README.md for examples.
@@ -81,7 +81,7 @@ class SpeechHandler(BaseHTTPRequestHandler):
                     return
                 with self.lock:
                     wav = self.tts.synthesize_wav(str(req["text"]), req.get("character_id"),
-                                                  req.get("extraversion"), req.get("emotion"))
+                                                  req.get("extraversion"), req.get("arousal"))
                 self._send(200, wav, "audio/wav")
                 self.log_message("tts %.2fs: %s %r", time.perf_counter() - t0,
                                  req.get("character_id"), req["text"])

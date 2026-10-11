@@ -1,6 +1,6 @@
 """Piper speaker for LLM2 — a drop-in replacement for LLM2's ConsoleSpeaker.
 
-LLM2 calls `speaker.speak(text, emotion)` (see LLM2/adapters.py `Speaker`). That call doesn't say
+LLM2 calls `speaker.speak(text, affect)` (see LLM2/adapters.py `Speaker`). That call doesn't say
 which character is talking, so PiperSpeaker reads it from the pipeline's active character
 (set by the NFC scan) and speaks in that character's voice from voices.json:
 
@@ -31,6 +31,8 @@ class PiperSpeaker:
             return None, None
         return active.character_id, active.profile.personality.traits.extraversion
 
-    def speak(self, text: str, emotion: str) -> None:
+    def speak(self, text: str, affect) -> None:
+        """`affect`: LLM2's Russell-circumplex point; its arousal sets the pace."""
         character_id, extraversion = self._active_voice()
-        self.tts.speak(text, character_id, extraversion, emotion, self.device)
+        self.tts.speak(text, character_id, extraversion, getattr(affect, "arousal", None),
+                       self.device)

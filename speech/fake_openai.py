@@ -17,14 +17,14 @@ import re
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# (keywords in the user's text, emotion) — first match wins
+# (keywords in the user's text, (valence, arousal)) on Russell's circumplex — first match wins
 EMOTION_RULES = [
-    (("tired", "sleep", "bed"), "sleepy"),
-    (("sad", "lonely", "miss"), "sad"),
-    (("worried", "scared", "medicine", "medication", "pain"), "worried"),
-    (("angry", "annoying", "hate"), "angry"),
-    (("great", "awesome", "yay", "birthday"), "excited"),
-    (("thanks", "thank you", "hello", "hi"), "happy"),
+    (("tired", "sleep", "bed"), (0.0, -0.8)),                             # sleepy
+    (("sad", "lonely", "miss"), (-0.7, -0.3)),                            # sad
+    (("worried", "scared", "medicine", "medication", "pain"), (-0.5, 0.5)),  # tense
+    (("angry", "annoying", "hate"), (-0.7, 0.7)),                         # tense, angry
+    (("great", "awesome", "yay", "birthday"), (0.7, 0.7)),                # excited
+    (("thanks", "thank you", "hello", "hi"), (0.7, 0.1)),                 # happy
 ]
 
 REPLIES = {
@@ -44,14 +44,14 @@ def fake_reply(messages: list[dict]) -> dict:
     lower = f" {text.lower()} "
     words_in = set(re.findall(r"[a-z']+", lower))
     emotion = next((e for words, e in EMOTION_RULES
-                    if any((w in lower) if " " in w else (w in words_in) for w in words)), "neutral")
+                    if any((w in lower) if " " in w else (w in words_in) for w in words)), (0.0, 0.0))
     actions = []
     light = re.search(r"- (light\.\w+):", system)
     if "light" in lower and light:
         service = "light.turn_off" if " off" in lower else "light.turn_on"
         actions.append({"service": service, "entity_id": light[1], "data_json": "{}"})
     template = REPLIES.get(name, "You said: {text}")
-    return {"tts_text": template.format(text=text.rstrip(".") + "."), "emotion": emotion,
+    return {"tts_text": template.format(text=text.rstrip(".") + "."), "valence": emotion[0], "arousal": emotion[1],
             "ha_actions": actions}
 
 
