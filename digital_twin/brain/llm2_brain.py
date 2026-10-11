@@ -195,6 +195,60 @@ class TwinHA(HomeAssistantClient):
         return True
 
     MAX_DELAY_S = 6 * 3600
+    reminder_list = None    # the one list Pebble may add to (e.g. todo.reminders)
+
+    # Health reminders are a carer's job, set by a person in HA, never by voice
+    # through a language model: a misheard dose or time is a real-world harm.
+    # This is the code-side backstop; the prompt asks the model not to try.
+    MEDICAL = re.compile(
+        r"\b(medic\w*|medicine\w*|pills?|pils|tablets?|capsules?|dos(e|es|age|ing)|"
+        r"insulin|inhaler\w*|prescri\w*|drugs?|antibiotic\w*|paracetamol|panadol|"
+        r"ibuprofen|nurofen|aspirin|vitamins?|supplements?|injections?|jabs?|"
+        r"\d+\s*(mg|mcg|ml|units?)|eye ?drops?|ointment|patch(es)?|treatment|therapy|"
+        r"blood (sugar|pressure)|glucose)\b", re.I)
+
+    def add_reminder(self, action):
+        """todo.add_item on Pebble's own list only, never health reminders."""
+        from datetime import datetime, timedelta
+        data = self._data(action) or {}
+        item = str(data.get("item", "")).strip()
+        note = str(data.get("description", "")).strip()
+        if not self.reminder_list or action.entity_id != self.reminder_list:
+            log.warning("refused: Pebble only adds reminders to %s, not %s",
+                        self.reminder_list, action.entity_id)
+            return False
+        if not item:
+            log.warning("refused reminder without text: %s", data)
+            return False
+        if self.MEDICAL.search(f"{item} {note}"):
+            log.warning("refused health reminder %r: a carer adds these in Home Assistant",
+                        item)
+            return False
+        now = datetime.now().astimezone()
+        due = None
+        try:
+            if data.get("in_minutes") not in (None, ""):
+                due = now + timedelta(minutes=float(data["in_minutes"]))
+            elif data.get("due"):
+                due = datetime.fromisoformat(str(data["due"]).strip().replace("T", " "))
+                due = due if due.tzinfo else due.astimezone()
+        except (TypeError, ValueError):
+            log.warning("refused reminder with unreadable time: %s", data)
+            return False
+        if due is not None and not (now - timedelta(minutes=1) <= due
+                                    <= now + timedelta(days=366)):
+            log.warning("refused reminder at %s: not within the next year", due)
+            return False
+        when = f" at {due:%a %d %b %H:%M}" if due else ""
+        if self.dry_run:
+            print(f"[HA dry-run] todo.add_item {action.entity_id} {item!r}{when}")
+        else:
+            self.device.add_item(action.entity_id, item, due, note)
+            print(f"[HA] reminder added: {item!r}{when}")
+        self.link.send({"type": "ha", "service": "todo.add_item",
+                        "data": {"entity_id": action.entity_id, "item": item,
+                                 **({"due": due.isoformat(timespec="minutes")} if due else {})}})
+        return True
 
     @staticmethod
     def _data(action):
@@ -224,6 +278,10 @@ class TwinHA(HomeAssistantClient):
     def execute(self, action):
         if action.service == "todo.update_item" and self.device is not None:
             ok = self.complete_reminder(action)
+            self.failed += not ok
+            return ok
+        if action.service == "todo.add_item" and self.device is not None:
+            ok = self.add_reminder(action)
             self.failed += not ok
             return ok
         # Models like HA's generic homeassistant.turn_off. Map it to the entity's
@@ -388,6 +446,9 @@ class Pipeline(LLM2Pipeline):
                                    for eid, st in now.items())
                 event = event.model_copy(update={
                     "text": f"{event.text}\n\n(Current device states: {listed})"})
+        if event.source == "stt":                 # the model has no clock otherwise
+            now = time.strftime("%A %Y-%m-%d %H:%M")
+            event = event.model_copy(update={"text": f"{event.text}\n(Now: {now})"})
         if self.reminder_source and event.source == "stt":
             items = self.reminder_source()
             if items is not None:
@@ -424,6 +485,21 @@ class Pipeline(LLM2Pipeline):
         "action: e.g. light.turn_off now, then light.turn_on with {\"delay_s\": 5}. "
         "Only say something will happen later if you emitted the delayed action.")
 
+    reminder_list = None        # where Pebble may add reminders (None: it can't)
+
+    def reminder_rules(self):
+        if not self.reminder_list:
+            return ("\nYou cannot create reminders; if asked, say someone can add them "
+                    "in Home Assistant.")
+        return (
+            f"\nTo set a reminder the user asks for, emit one ha_action: service "
+            f"\"todo.add_item\", entity_id \"{self.reminder_list}\", data_json "
+            f"{{\"item\": \"<what to do>\", \"due\": \"YYYY-MM-DD HH:MM\"}} in local time "
+            f"(work it out from Now), or {{\"item\": ..., \"in_minutes\": N}}. If they "
+            f"gave no time, leave both out (never invent one). NEVER create reminders about medication, medicine, "
+            f"pills, doses or any health treatment: say that for safety a carer or family "
+            f"member has to add those in Home Assistant.")
+
     def set_active_tag(self, nfc_tag_id):
         char = super().set_active_tag(nfc_tag_id)
         with self._lock:
@@ -433,6 +509,8 @@ class Pipeline(LLM2Pipeline):
             if self.state_source or self.reminder_source:
                 self._system_prompt += self.GROUNDING
             self._system_prompt += self.HA_RULES
+            if self.reminder_source:
+                self._system_prompt += self.reminder_rules()
         return char
 
 
@@ -471,6 +549,9 @@ def main():
     ap.add_argument("--ha-device", nargs="?", const="Pebble", metavar="NAME",
                     help="register as a Home Assistant device (default name Pebble) "
                          "and receive its notifications")
+    ap.add_argument("--reminder-list", default="todo.reminders", metavar="ENTITY",
+                    help="HA to-do list Pebble may add reminders to (never medication; "
+                         "default todo.reminders)")
     ap.add_argument("--no-reminders", action="store_true",
                     help="don't announce HA to-do/calendar items when they fall due")
     ap.add_argument("--ha-entities", choices=("auto", "ha", "file"), default="auto",
@@ -523,6 +604,16 @@ def main():
     # when HA decides what is exposed, empty must mean nothing.
     pipe.ha.strict = Pipeline.entity_source is not None
     pipe.ha.device = device
+    if device is not None:
+        lists = device.todo_lists()
+        if args.reminder_list in lists:
+            Pipeline.reminder_list = pipe.ha.reminder_list = args.reminder_list
+            print(f"  Pebble adds reminders to {args.reminder_list} "
+                  f"({lists[args.reminder_list]}); health reminders stay manual")
+        else:
+            print(f"  no to-do list {args.reminder_list} in HA, so Pebble can't add "
+                  f"reminders. Create one: Settings > Devices & services > Add integration "
+                  f"> Local To-do, named \"Reminders\"")
     if args.local:
         tune_for_local(pipe.client)
     if piper:

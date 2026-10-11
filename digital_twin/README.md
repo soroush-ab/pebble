@@ -110,6 +110,18 @@ more than 12 h are not announced, so a restart doesn't replay yesterday.
 `--no-reminders` turns the announcements off. A to-do list called `medication`
 with due times is all the medication use case needs.
 
+**Adding reminders by voice.** "Remind me to call Mum at 6" / "…in 20 minutes to
+check the oven" adds an item to **one** HA to-do list, `todo.reminders` by default
+(`--reminder-list`; create it as a Local To-do list named *Reminders*). Pebble is
+given the current time with every request so it can work out "tomorrow at 6".
+**Medication and other health reminders can't be added by voice.** A misheard
+dose or time is real harm, so they're added by a carer in HA. Enforced in code,
+not just asked of the model: Pebble may only add to its own list (never
+`medication`), anything mentioning medication, pills, doses, insulin etc. is
+refused, and so are times in the past or more than a year ahead. Gemma
+declines these itself ("a carer or family member needs to add that in Home
+Assistant"); the code check is the backstop.
+
 **Entities come from HA, not `ha_entities.json`.** Pebble controls what you've
 exposed to voice assistants (**Settings → Voice assistants → Expose**), named
 with their area ("Bedroom Lamp (Bedroom)"); if nothing is exposed, everything in

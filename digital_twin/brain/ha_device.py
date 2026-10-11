@@ -180,6 +180,26 @@ class HADevice:
             pass
         self.poke()
 
+    def add_item(self, todo_entity, item, due=None, description=""):
+        """Add a to-do item; `due` an aware datetime (HA stores it in its own zone)."""
+        body = {"entity_id": todo_entity, "item": item}
+        if due is not None:
+            body["due_datetime"] = due.isoformat(timespec="seconds")
+        if description:
+            body["description"] = description
+        req = urllib.request.Request(
+            self.base_url + "/api/services/todo/add_item", method="POST",
+            data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {self.token}", "User-Agent": "Pebble/0.1",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        self.poke()
+
+    def todo_lists(self):
+        return {s["entity_id"]: s["attributes"].get("friendly_name", s["entity_id"])
+                for s in self._get("/api/states") if s["entity_id"].startswith("todo.")}
+
     def poke(self):
         """Re-read reminders now (after a change) instead of at the next poll."""
         self._wake.set()
