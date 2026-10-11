@@ -194,6 +194,33 @@ class TwinHA(HomeAssistantClient):
                                  "status": "completed"}})
         return True
 
+    MAX_DELAY_S = 6 * 3600
+
+    @staticmethod
+    def _data(action):
+        """data_json as a dict. Small models write Python dicts ({'a': 1}) as
+        often as JSON; accept both rather than failing the user's request."""
+        import ast
+        raw = (action.data_json or "").strip() or "{}"
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            try:
+                data = ast.literal_eval(raw)
+            except (ValueError, SyntaxError):
+                # last resort, for output like '{} "delay_s": 5': salvage key: value pairs
+                pairs = re.findall(r"""["']?(\w+)["']?\s*:\s*("[^"]*"|'[^']*'|-?[\d.]+|true|false)""",
+                                   raw)
+                if not pairs:
+                    return None
+                data = {}
+                for k, v in pairs:
+                    try:
+                        data[k] = json.loads(v.replace("'", '"'))
+                    except ValueError:
+                        return None
+        return data if isinstance(data, dict) else None
+
     def execute(self, action):
         if action.service == "todo.update_item" and self.device is not None:
             ok = self.complete_reminder(action)
@@ -205,9 +232,32 @@ class TwinHA(HomeAssistantClient):
         if domain == "homeassistant" and "." in action.entity_id:
             action = action.model_copy(update={
                 "service": f"{action.entity_id.split('.', 1)[0]}.{service}"})
-        if self.strict and action.entity_id not in self.allowed_entities:
+        data = self._data(action)
+        delay = 0.0
+        if data is not None:
+            try:
+                delay = float(data.pop("delay_s", 0) or 0)
+            except (TypeError, ValueError):
+                delay = 0.0
+            action = action.model_copy(update={"data_json": json.dumps(data)})
+        if data is None:
+            log.warning("unreadable data_json: %r", action.data_json)
+            ok = False
+        elif self.strict and action.entity_id not in self.allowed_entities:
             log.warning("entity not exposed to Pebble in HA: %s", action.entity_id)
             ok = False
+        elif delay > 0:
+            # "turn it off, and back on in 5 seconds": checked now, run later
+            if action.service.partition(".")[0] not in self.allowed_domains:
+                log.warning("domain not allowed: %s", action.service)
+                ok = False
+            else:
+                delay = min(delay, self.MAX_DELAY_S)
+                t = threading.Timer(delay, self._run_later, args=(action,))
+                t.daemon = True
+                t.start()
+                print(f"[HA] {action.service} -> {action.entity_id} in {delay:g} s")
+                return True
         else:
             ok = super().execute(action)
         if ok:
@@ -216,6 +266,13 @@ class TwinHA(HomeAssistantClient):
         else:
             self.failed += 1
         return ok
+
+
+    def _run_later(self, action):
+        if not self.execute(action):
+            log.warning("delayed %s on %s failed", action.service, action.entity_id)
+            self.link.send({"type": "eyes", "expression": "concerned",
+                            "valence": -0.5, "arousal": 0.3})
 
 
 class MicRecorder:
@@ -360,6 +417,13 @@ class Pipeline(LLM2Pipeline):
         "{\"item\": \"<the item text exactly>\", \"status\": \"completed\"}. Only "
         "when they say it is done, never on a guess.")
 
+    HA_RULES = (
+        "\ndata_json must be valid JSON with double quotes, e.g. {\"brightness_pct\": 50}. "
+        "To do something later (\"in 5 seconds\", \"after 10 minutes\"), add "
+        "\"delay_s\": <seconds> to that action's data_json, and give each step its own "
+        "action: e.g. light.turn_off now, then light.turn_on with {\"delay_s\": 5}. "
+        "Only say something will happen later if you emitted the delayed action.")
+
     def set_active_tag(self, nfc_tag_id):
         char = super().set_active_tag(nfc_tag_id)
         with self._lock:
@@ -368,6 +432,7 @@ class Pipeline(LLM2Pipeline):
                                         f"in one or two short spoken sentences.")
             if self.state_source or self.reminder_source:
                 self._system_prompt += self.GROUNDING
+            self._system_prompt += self.HA_RULES
         return char
 
 

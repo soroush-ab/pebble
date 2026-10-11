@@ -29,7 +29,7 @@ OCTANTS: list[tuple[float, str]] = [
 LABELS: list[str] = ["neutral"] + [name for _, name in OCTANTS]
 
 # 强度低于此值视为中性 / below this intensity the affect reads as neutral
-NEUTRAL_RADIUS = 0.2
+NEUTRAL_RADIUS = 0.3
 
 
 def _clamp(x: float) -> float:
