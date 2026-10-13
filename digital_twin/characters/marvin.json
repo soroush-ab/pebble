@@ -24,7 +24,7 @@
       "tipi": 4.1
     }
   },
-  "_review": "Extraversion = High (5.8) is taken from the Week-5 deck, but Marvin is canonically LOW extraversion / HIGH neuroticism - the deadpan one-liners are low-affect, not extraverted. Either re-score, or rename the differentiating axis to 'warmth/proactivity'. See TODO.md section 1. Flagged, not changed.",
+  "_review": "2026-10-09 team decision: Extraversion stays High (5.8), matching the Week-5 deck and LLM1's seed data - keeps Extraversion as the single differentiating axis across all three characters per the course rubric. motion_profile below was retuned to match High-E (quick, decisive) instead of changing the OCEAN value.",
   "tone": "Dry, direct, deadpan. Minimal affect. Respects the user's autonomy absolutely.",
   "behaviour_rules": [
     "Execute immediately. Never ask permission for a reversible action.",
@@ -33,12 +33,12 @@
     "Never initiate a wellbeing check-in; log and move on."
   ],
   "motion_profile": {
-    "speed_scale": 0.85,
-    "amplitude_scale": 0.55,
-    "settle_ms": 600,
-    "_comment": "Almost no lead and a long settle: turns, eventually. Reads as unbothered. No head yaw exists; see twin/kinematics.py.",
-    "lead_roll_deg": 2.0,
-    "lead_pitch_deg": 0.5
+    "speed_scale": 1.1,
+    "amplitude_scale": 0.6,
+    "settle_ms": 180,
+    "_comment": "Quick, decisive reaction and a fast settle - High-E/assertive, but still the smallest amplitude of the three: capable and brisk, not showy. No head yaw exists; see twin/kinematics.py.",
+    "lead_roll_deg": 10.0,
+    "lead_pitch_deg": 2.5
   },
   "eye_style": {
     "base_expression": "neutral",
