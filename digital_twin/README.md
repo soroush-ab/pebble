@@ -157,6 +157,11 @@ Flattens the 136-link Fusion export into the four bodies that move, bakes their
 fixed-transform chains into merged STLs, and writes the real joint axes, origins
 and servo limits to `config/urdf_derived.json`. Re-run after any CAD change.
 
+The baked output (`twin/web/meshes/*.stl`, `config/urdf_derived.json`) **is
+committed**, so a fresh clone runs the twin with no CAD and no extra step. Only
+whoever changes the CAD re-bakes, from their Fusion URDF export, and commits the
+new meshes and JSON together.
+
 **The mechanism is a parallel one.** The neck is a universal joint driven by two
 MG995 pushrods, so its DOF are **roll** and **pitch** — there is no head yaw, and
 all turning comes from the base stepper. Motions are authored in head pose;
