@@ -61,6 +61,7 @@ enum {
     MSG_ENCODER     = 0x20,
     MSG_RFID        = 0x21,
     MSG_MOTION      = 0x22,
+    MSG_FRAME_INFO  = 0x23,   /* reply to MSG_FRAME_QUERY                 */
 };
 
 /* ------------------------------------------------- PC -> ESP32 (downlink) */
@@ -70,6 +71,11 @@ enum {
 
     MSG_DISP_BLIT   = 0x90,   /* pixels for a rectangle                   */
     MSG_DISP_FILL   = 0x91,   /* solid rectangle, 10 bytes instead of kB  */
+    MSG_FRAME_STORE = 0x92,   /* upload a full-panel RLE frame into PSRAM */
+    MSG_FRAME_SHOW  = 0x93,   /* draw a stored left/right pair now        */
+    MSG_FRAME_ANIM  = 0x94,   /* play stored pairs with local timing      */
+    MSG_FRAME_CLEAR = 0x95,   /* free every stored frame                  */
+    MSG_FRAME_QUERY = 0x96,   /* ask for MSG_FRAME_INFO                   */
 
     MSG_MOTION_SET  = 0xA0,   /* setpoints; ESP interpolates              */
     MSG_MOTION_EN   = 0xA1,
@@ -168,5 +174,43 @@ typedef struct __attribute__((packed)) {
     uint16_t encoder_hz;
     uint16_t rfid_hz;
 } config_t;
+
+/* Stored eye frames. Wi-Fi gives ~340 kB/s, so streaming pixels made blinks
+ * slow and the two eyes visibly out of step. The PC uploads every frame once
+ * per connection (PSRAM, lost on reboot - it re-uploads), then only names
+ * them: a blink is one MSG_FRAME_ANIM played here with local timing.
+ *
+ * A frame is a full 240x240 panel in RLE16: runs of {u16 count (LE),
+ * u8 colour[2] (panel byte order, high byte first)}, counts summing to
+ * 57600. Large frames arrive in chunks; `offset` places each one. */
+#define FRAME_MAX_ID    1024
+#define FRAME_NONE      0xFFFF          /* in a pair: leave that eye as is  */
+#define FRAME_ANIM_MAX  16
+
+typedef struct __attribute__((packed)) {
+    uint16_t id;
+    uint8_t  fmt;             /* 1 = RLE16                                 */
+    uint8_t  _pad;
+    uint32_t total;           /* full frame size in bytes                  */
+    uint32_t offset;          /* where this chunk goes                     */
+} frame_store_t;              /* + chunk bytes                             */
+
+typedef struct __attribute__((packed)) {
+    uint16_t left;
+    uint16_t right;
+} frame_pair_t;
+
+typedef struct __attribute__((packed)) {
+    uint16_t frame_ms;        /* per step                                  */
+    uint8_t  n;               /* steps, <= FRAME_ANIM_MAX                  */
+    uint8_t  _pad;
+} frame_anim_t;               /* + n x frame_pair_t                        */
+
+typedef struct __attribute__((packed)) {
+    uint16_t count;           /* complete frames stored                    */
+    uint16_t max_id;
+    uint32_t bytes;
+    uint32_t psram_free;
+} frame_info_t;
 
 #endif /* PEBBLE_PROTO_H_ */

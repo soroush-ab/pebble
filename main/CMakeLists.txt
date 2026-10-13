@@ -4,6 +4,7 @@ idf_component_register(
          "mic_adc.c"
          "mic_i2s.c"
          "disp.c"
+         "frames.c"
          "rfid.c"
          "encoder.c"
          "motion.c"

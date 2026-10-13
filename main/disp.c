@@ -8,6 +8,7 @@
  */
 #include "disp.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "board.h"
@@ -17,9 +18,14 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 static const char *TAG = "disp";
+/* The bus is shared by the network task (blit/fill) and the frame player. */
+static SemaphoreHandle_t s_lock;
+#define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
+#define UNLOCK() xSemaphoreGive(s_lock)
 static spi_device_handle_t s_dev[2];
 
 #define LINE_BUF_PX 2048
@@ -140,6 +146,8 @@ esp_err_t disp_init(void)
 
     s_linebuf = heap_caps_malloc(LINE_BUF_PX * 2, MALLOC_CAP_DMA);
     ESP_RETURN_ON_FALSE(s_linebuf, ESP_ERR_NO_MEM, TAG, "linebuf");
+    s_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "lock");
 
     gpio_set_level(PIN_DISP_RST, 0); vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(PIN_DISP_RST, 1); vTaskDelay(pdMS_TO_TICKS(120));
@@ -161,6 +169,7 @@ esp_err_t disp_blit(uint8_t which, uint16_t x, uint16_t y, uint16_t w, uint16_t 
                     const uint16_t *px)
 {
     ESP_RETURN_ON_ERROR(clip(&x, &y, &w, &h), TAG, "rect");
+    LOCK();
     for (int i = 0; i < 2; i++) {
         if (which != 2 && which != i) continue;
         set_window(s_dev[i], x, y, w, h);
@@ -176,6 +185,7 @@ esp_err_t disp_blit(uint8_t which, uint16_t x, uint16_t y, uint16_t w, uint16_t 
             left -= n;
         }
     }
+    UNLOCK();
     return ESP_OK;
 }
 
@@ -183,6 +193,7 @@ esp_err_t disp_fill(uint8_t which, uint16_t x, uint16_t y, uint16_t w, uint16_t 
                     uint16_t color)
 {
     ESP_RETURN_ON_ERROR(clip(&x, &y, &w, &h), TAG, "rect");
+    LOCK();
     for (int k = 0; k < LINE_BUF_PX; k++) s_linebuf[k] = color;
     for (int i = 0; i < 2; i++) {
         if (which != 2 && which != i) continue;
@@ -195,6 +206,46 @@ esp_err_t disp_fill(uint8_t which, uint16_t x, uint16_t y, uint16_t w, uint16_t 
             spi_device_polling_transmit(s_dev[i], &t);
             left -= n;
         }
+    }
+    UNLOCK();
+    return ESP_OK;
+}
+
+esp_err_t disp_rle(uint8_t which, const uint8_t *rle, uint32_t len)
+{
+    if (which > 1 || !rle) return ESP_ERR_INVALID_ARG;
+    const uint32_t total = (uint32_t)DISP_WIDTH * DISP_HEIGHT;
+    uint32_t done = 0, fill = 0;
+    LOCK();
+    set_window(s_dev[which], 0, 0, DISP_WIDTH, DISP_HEIGHT);
+    dc(1);
+    for (uint32_t i = 0; i + 4 <= len && done < total; i += 4) {
+        uint32_t count = (uint32_t)rle[i] | ((uint32_t)rle[i + 1] << 8);
+        uint16_t colour;
+        memcpy(&colour, rle + i + 2, 2);           /* already panel byte order */
+        if (count > total - done) count = total - done;
+        done += count;
+        while (count) {
+            uint32_t n = LINE_BUF_PX - fill;
+            if (n > count) n = count;
+            for (uint32_t k = 0; k < n; k++) s_linebuf[fill + k] = colour;
+            fill += n;
+            count -= n;
+            if (fill == LINE_BUF_PX) {
+                spi_transaction_t t = {.length = fill * 16, .tx_buffer = s_linebuf};
+                spi_device_polling_transmit(s_dev[which], &t);
+                fill = 0;
+            }
+        }
+    }
+    if (fill) {
+        spi_transaction_t t = {.length = fill * 16, .tx_buffer = s_linebuf};
+        spi_device_polling_transmit(s_dev[which], &t);
+    }
+    UNLOCK();
+    if (done != total) {
+        ESP_LOGW(TAG, "rle frame covers %" PRIu32 " of %" PRIu32 " px", done, total);
+        return ESP_ERR_INVALID_SIZE;
     }
     return ESP_OK;
 }

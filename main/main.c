@@ -39,6 +39,7 @@
 #endif
 #if CONFIG_PEBBLE_EN_DISP
 #include "disp.h"
+#include "frames.h"
 #endif
 #if CONFIG_PEBBLE_EN_RFID
 #include "rfid.h"
@@ -98,6 +99,36 @@ static void on_msg(uint8_t type, const uint8_t *p, uint32_t len)
         if (len < sizeof(disp_fill_t)) break;
         const disp_fill_t *f = (const disp_fill_t *)p;
         disp_fill(f->which, f->x, f->y, f->w, f->h, f->color);
+        break;
+    }
+    case MSG_FRAME_STORE:
+        if (s_have.disp) frames_store(p, len);
+        break;
+    case MSG_FRAME_SHOW: {
+        if (len < sizeof(frame_pair_t) || !s_have.disp) break;
+        frame_pair_t pr;
+        memcpy(&pr, p, sizeof(pr));
+        frames_show(pr.left, pr.right);
+        break;
+    }
+    case MSG_FRAME_ANIM: {
+        if (len < sizeof(frame_anim_t) || !s_have.disp) break;
+        frame_anim_t a;
+        memcpy(&a, p, sizeof(a));
+        if (len < sizeof(a) + (uint32_t)a.n * sizeof(frame_pair_t)) break;
+        frame_pair_t steps[FRAME_ANIM_MAX];
+        const uint8_t n = a.n > FRAME_ANIM_MAX ? FRAME_ANIM_MAX : a.n;
+        memcpy(steps, p + sizeof(a), n * sizeof(frame_pair_t));
+        frames_anim(steps, n, a.frame_ms);
+        break;
+    }
+    case MSG_FRAME_CLEAR:
+        if (s_have.disp) frames_clear();
+        break;
+    case MSG_FRAME_QUERY: {
+        frame_info_t fi = {0};
+        if (s_have.disp) frames_info(&fi);
+        net_send(MSG_FRAME_INFO, NULL, 0, &fi, sizeof(fi));
         break;
     }
 #endif
@@ -162,7 +193,7 @@ static void send_hello(void)
     h.mic_angle_deg[2] = MIC_ANGLE_C_DEG;
     h.mic_radius_m = MIC_RADIUS_M;
     h.boot_t_us = (uint64_t)esp_timer_get_time();
-    snprintf(h.fw, sizeof(h.fw), "pebble-bridge 1");
+    snprintf(h.fw, sizeof(h.fw), "pebble-bridge 2 frames");
     net_send(MSG_HELLO, NULL, 0, &h, sizeof(h));
 }
 #endif /* CONFIG_PEBBLE_EN_NET */
@@ -283,6 +314,7 @@ void app_main(void)
 #endif
 #if CONFIG_PEBBLE_EN_DISP
     TRY(s_have.disp, "displays", disp_init());
+    if (s_have.disp) TRY(s_have.disp, "eye frames", frames_init());
 #endif
 #if CONFIG_PEBBLE_EN_RFID
     TRY(s_have.rfid, "rfid", rfid_init());
