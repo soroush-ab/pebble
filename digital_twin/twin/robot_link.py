@@ -1,4 +1,4 @@
-"""Link to the physical Pebble (Pebble MCU firmware, `main/proto.h`).
+"""Link to the physical Pebble (firmware in `../firmware`, `main/proto.h`).
 
 The real robot is a thin I/O bridge: it dials out to this PC over TCP, streams
 its sensors and applies setpoints. This module speaks that binary protocol so

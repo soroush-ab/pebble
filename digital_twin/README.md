@@ -41,7 +41,7 @@ python3 twin/run.py --robot --robot-motion   # + neck servos (capped, see below)
 uv run --env-file ../LLM2/.env brain/llm2_brain.py --local --mic robot --voice --ha-device
 ```
 
-The twin's MCU logic drives the real robot (firmware in `Pebble MCU`) through
+The twin's MCU logic drives the real robot (firmware in `../firmware`) through
 `twin/robot.py`; the brain and the viewer can't tell the difference.
 
 - **Eyes:** every expression × blink stage × character is rendered here and
