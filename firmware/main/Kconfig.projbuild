@@ -1,0 +1,65 @@
+menu "Pebble link"
+
+config PEBBLE_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "pebble-net"
+
+config PEBBLE_WIFI_PASS
+    string "Wi-Fi password"
+    default ""
+
+config PEBBLE_HOST_IP
+    string "PC host IPv4 address"
+    default "192.168.1.100"
+    help
+      The ESP32 dials out to this address. Client-side so it recovers by
+      itself after a reboot or a DHCP change.
+
+config PEBBLE_HOST_PORT
+    int "PC host TCP port"
+    default 9000
+
+endmenu
+
+menu "Pebble subsystems"
+
+comment "Turn off anything not yet wired. Nothing here is required to boot:"
+comment "a disabled or absent peripheral logs and is skipped."
+
+config PEBBLE_EN_NET
+    bool "Wi-Fi link to the PC"
+    default y
+
+config PEBBLE_EN_MIC_ADC
+    bool "Analog microphone array (ADC1)"
+    default y
+
+config PEBBLE_EN_MIC_I2S
+    bool "Digital microphone (I2S)"
+    default y
+
+config PEBBLE_EN_DISP
+    bool "Round displays (SPI2)"
+    default y
+
+config PEBBLE_EN_RFID
+    bool "RFID reader (SPI3)"
+    default y
+
+config PEBBLE_EN_ENCODER
+    bool "Magnetic encoder (I2C)"
+    default y
+
+config PEBBLE_EN_MOTION
+    bool "Stepper and servos"
+    default y
+
+config PEBBLE_START_SELFTEST
+    bool "Boot into the self-test menu instead of bridge mode"
+    default n
+    help
+      Interactive per-subsystem tests over the USB console. Needs no Wi-Fi
+      and no PC, so it is the right place to start when bringing up boards.
+      You can also reach it at runtime by pressing '?' at any time.
+
+endmenu

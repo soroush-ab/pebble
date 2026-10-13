@@ -1,0 +1,9 @@
+# Pebble MCU - 16 MB flash (N16R8).
+# The default table gives the app 1 MB, which the Wi-Fi stack alone nearly
+# fills. 3 MB leaves room to grow, and two OTA slots mean the robot can be
+# updated without unplugging it from inside the shell.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+phy_init, data, phy,     0xf000,   0x1000
+factory,  app,  factory, 0x10000,  3M
+storage,  data, spiffs,  ,         1M
