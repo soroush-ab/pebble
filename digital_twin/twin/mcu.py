@@ -14,6 +14,7 @@ import random
 import threading
 import time
 
+import expressions
 import kinematics
 import linkage
 import motion
@@ -325,6 +326,15 @@ class PebbleMCU:
                 self.to_brain({"type": "utterance", "text": text,
                                "bearing": self.attend_deg,
                                "character_id": (self.character or {}).get("character_id")})
+            elif kind == "show_affect":
+                # the survey page: show one emotion exactly as the brain would
+                eyes, move = expressions.actions(float(msg.get("valence", 0.0)),
+                                                 float(msg.get("arousal", 0.0)))
+                self.set_eyes(eyes["expression"], eyes["valence"], eyes["arousal"])
+                if msg.get("motion", True):
+                    self.engine.play(move["id"], move["speed"], move["amp"])
+                self.log("survey", f"{expressions.label(eyes['valence'], eyes['arousal'])}"
+                                   f"{' + ' + move['id'] if msg.get('motion', True) else ''}")
             elif kind == "home":
                 self.attend_deg = None
                 self.engine.play("settle")

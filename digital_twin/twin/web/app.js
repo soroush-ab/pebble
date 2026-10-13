@@ -91,15 +91,23 @@ function drawEye(eye, s) {
   const v = s.valence || 0, a = s.arousal || 0, open = 1 - s.blink;
   const neg = Math.max(0, -v), pos = Math.max(0, v);
   const irisR = 52 * (s.iris_scale || 1) * (1 + 0.08 * a) * (1 - 0.15 * neg);
-  const lidTop = (a >= 0 ? -0.06 * a : 0.76 * Math.pow(-a, 1.3)) + 0.3 * neg;
-  const lidBot = 0.12 * Math.max(0, -a);
-  const squint = 0.6 * pos;
+  const hiA = Math.max(0, a), loA = Math.max(0, -a);
+  // Tuned on the robot (2026-10-13): pleasant feelings soften low-arousal lid
+  // closure (calm read as "serious"), unpleasant ones cap it (depressed read as
+  // "high"), and a hint of lid at rest lets alert open WIDER than neutral.
+  const lidArousal = 0.76 * Math.pow(loA, 1.3) * (1 - 0.7 * pos) * (1 - 0.8 * neg);
+  const lidTop = (a >= 0 ? -0.06 * a : lidArousal) + 0.3 * neg * (1 - 0.5 * loA)
+                 + 0.08 * (1 - hiA) * (1 - loA);        // resting lid: not on top of sleepy lids
+  const lidBot = 0.12 * loA;
+  const squint = 0.6 * pos * (1 - 0.5 * loA);
   const tilt = 0.75 * neg * (a > 0.55 ? -1 : 1);
 
   // look down when unpleasant or low-energy, a little up when alert
   const gx = c + (s.gaze || 0) * 26,
         gy = c + 10 * neg + 8 * Math.max(0, -a) - 6 * Math.max(0, a);
-  const pupilR = irisR * (0.38 + 0.12 * a);                  // dilates with arousal
+  // pupils: wide on unpleasant arousal (tense), small and focused on pleasant or
+  // neutral arousal (alert, excited: big pupils there read as a jump scare)
+  const pupilR = irisR * (v < 0 ? 0.38 + 0.12 * a : 0.38 - 0.12 * hiA + 0.08 * loA);
   const bulge = 40 * pos;                                    // smiling lower lid
   const sparkle = Math.min(1, 3 * pos * Math.max(0, a));     // extra glint when excited
 

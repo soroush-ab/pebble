@@ -57,6 +57,26 @@ The twin's MCU logic drives the real robot (firmware in `../firmware`) through
 - Not yet: the base (not installed), RFID (reader not detected), a speaker on
   the robot (voice plays on the PC).
 
+### Emotion recognition survey
+
+```bash
+python3 twin/run.py --robot --robot-motion      # or plain twin/run.py for the screen condition
+# open http://localhost:8730/survey on a laptop/tablet next to the robot
+```
+
+Shows each expression (neutral + the 8 Russell octants, optionally the mild
+versions too) in random order, exactly as the brain would show it (eyes +
+motion, `twin/expressions.py`). The participant picks what they think it is and
+how sure they are. Every finished session is saved to `survey/`:
+
+| File | Contents |
+|---|---|
+| `responses.csv` | one row per answer: participant, character, condition, shown emotion, valence/arousal, motion, answer, correct, confidence (1-5), response time, replays, comment |
+| `report.csv` | per emotion (overall and per character): n, recognised %, mean confidence, mean time, most common confusion, all answers |
+| `confusion.csv` | shown × answered counts |
+
+`survey/` is git-ignored: it holds participant data.
+
 ### With the real LLM brain (`../LLM2`)
 
 `brain/llm2_brain.py` replaces the stub with the team's LLM2 pipeline, unmodified:

@@ -19,7 +19,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import expressions               # noqa: E402
 import mcu as mcu_mod            # noqa: E402
+import survey                    # noqa: E402
 import motion                    # noqa: E402
 import ws                        # noqa: E402
 
@@ -96,6 +98,23 @@ class Handler(BaseHTTPRequestHandler):
             with open(derived, "rb") as fh:
                 return self._send(200, "application/json", fh.read())
 
+        if path == "/survey":
+            path = "/survey.html"
+        if path == "/survey/config":
+            return self._send(200, "application/json", json.dumps({
+                "choices": [{"id": k, "label": v} for k, v in expressions.CHOICES],
+                "stimuli": expressions.stimuli(include_mild=True),
+                "motions": expressions.OCTANT_MOTION,
+                "characters": [{"id": c["character_id"], "name": c["display_name"]}
+                               for c in m.characters.values()],
+            }).encode())
+        if path.startswith("/survey/") and path.endswith(".csv"):
+            f = os.path.join(survey.DIR, os.path.basename(path))
+            if not os.path.isfile(f):
+                return self.send_error(404, "no responses yet")
+            with open(f, "rb") as fh:
+                return self._send(200, "text/csv; charset=utf-8", fh.read())
+
         if path == "/health":
             return self._send(200, "application/json",
                               json.dumps({"ok": True, "fw": mcu_mod.FW_VERSION,
@@ -110,6 +129,21 @@ class Handler(BaseHTTPRequestHandler):
             body = fh.read()
         ctype = TYPES.get(os.path.splitext(full)[1], "application/octet-stream")
         self._send(200, ctype, body)
+
+    def do_POST(self):
+        if self.path.split("?", 1)[0] != "/survey/results":
+            return self.send_error(404, "not found")
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            saved = survey.save(json.loads(self.rfile.read(n)))
+        except Exception as exc:                 # tell the page, keep the twin up
+            return self._send(400, "application/json",
+                              json.dumps({"ok": False, "error": str(exc)}).encode())
+        print(f"  survey: saved {saved} answers -> {survey.DIR}")
+        self._send(200, "application/json", json.dumps({
+            "ok": True, "saved": saved,
+            "files": ["/survey/responses.csv", "/survey/report.csv", "/survey/confusion.csv"],
+        }).encode())
 
     def _send(self, code, ctype, body):
         self.send_response(code)

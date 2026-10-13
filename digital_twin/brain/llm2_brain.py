@@ -64,6 +64,7 @@ PEBBLE = ROOT.parent                                  # pebble/ (LLM1, LLM2, spe
 sys.path.insert(0, str(ROOT / "twin"))
 sys.path.insert(0, str(PEBBLE / "LLM2"))
 
+import expressions  # noqa: E402
 import ws  # noqa: E402
 from adapters import Face, HomeAssistantClient, Speaker  # noqa: E402
 from pipeline import LLM2Pipeline, NoActiveCharacter  # noqa: E402
@@ -73,23 +74,6 @@ from settings import load_settings  # noqa: E402
 TWIN = os.environ.get("PEBBLE_TWIN", "ws://localhost:8730/brain")
 LOCAL_LLM = os.environ.get("PEBBLE_LOCAL_LLM", "http://127.0.0.1:9931/v1")
 
-# LLM2 emits a point on Russell's circumplex (valence x arousal, -1..1). The
-# eyes get the point itself (the twin draws it continuously; `expression` is the
-# nearest named preset, for firmware that only knows names). The motion is picked
-# by the octant and scaled by the point: arousal -> faster, intensity -> bigger.
-# On top of that the MCU applies the character's own scaling (characters/*.json),
-# so the same nod reads slow and large on Baymax, small and quick on R2-D2.
-OCTANT_MOTION = {                  # one body language per octant (motions.yaml)
-    "neutral":   "ack_nod",
-    "happy":     "happy_bounce",
-    "excited":   "excited_wiggle",
-    "alert":     "perk_up",
-    "tense":     "recoil",           # very unpleasant + very aroused: shake_no
-    "sad":       "droop",
-    "depressed": "sag",
-    "sleepy":    "doze",
-    "calm":      "sway",
-}
 # Head gestures the model may ask for (robot.gesture), described in words a
 # small model maps requests onto. Only those the robot reports in `hello`.
 GESTURE_HINTS = {
@@ -103,22 +87,10 @@ GESTURE_HINTS = {
     "sway": "calm, gentle sway",
 }
 
-EYE_PRESETS = {"neutral": (0.0, 0.0), "attentive": (0.2, 0.5), "concerned": (-0.5, 0.3),
-               "confirming": (0.7, 0.1), "sleep": (0.0, -1.0)}       # = twin/mcu.py
-
-
 def affect_actions(affect):
-    """Russell point -> (eyes message, motion message)."""
-    v, a = affect.valence, affect.arousal
-    expr = min(EYE_PRESETS, key=lambda e: (EYE_PRESETS[e][0] - v) ** 2
-               + (EYE_PRESETS[e][1] - a) ** 2)
-    motion = OCTANT_MOTION[affect.label]
-    if affect.label == "tense" and v < -0.5 and a > 0.6:
-        motion = "shake_no"
-    eyes = {"type": "eyes", "expression": expr, "valence": round(v, 3), "arousal": round(a, 3)}
-    move = {"type": "motion", "id": motion, "speed": round(1 + 0.25 * a, 3),
-            "amp": round(0.85 + 0.35 * affect.intensity, 3)}
-    return eyes, move
+    """Russell point -> (eyes message, motion message). The mapping is shared with
+    the twin and the recognition survey: twin/expressions.py."""
+    return expressions.actions(affect.valence, affect.arousal)
 
 
 class Link:

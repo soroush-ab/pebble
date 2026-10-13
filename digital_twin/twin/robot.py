@@ -54,16 +54,24 @@ def render_eye(state, inner_on_left, bezel=True):
     openness = 1.0 - float(state.get("blink") or 0.0)
     neg, pos = max(0.0, -v), max(0.0, v)
     iris_r = 52 * float(state.get("iris_scale") or 1.0) * (1 + 0.08 * a) * (1 - 0.15 * neg)
-    lid_top = (-0.06 * a if a >= 0 else 0.76 * (-a) ** 1.3) + 0.3 * neg
-    lid_bot = 0.12 * max(0.0, -a)
-    squint = 0.6 * pos
+    hi_a, lo_a = max(0.0, a), max(0.0, -a)
+    # Tuned on the robot (2026-10-13): pleasant feelings soften low-arousal lid
+    # closure (calm read as "serious"), unpleasant ones cap it (depressed read
+    # as "high"), and a hint of lid at rest lets alert open WIDER than neutral.
+    lid_arousal = 0.76 * lo_a ** 1.3 * (1 - 0.7 * pos) * (1 - 0.8 * neg)
+    lid_top = ((-0.06 * a if a >= 0 else lid_arousal) + 0.3 * neg * (1 - 0.5 * lo_a)
+               + 0.08 * (1 - hi_a) * (1 - lo_a))       # resting lid: not on top of sleepy lids
+    lid_bot = 0.12 * lo_a
+    squint = 0.6 * pos * (1 - 0.5 * lo_a)
     tilt = 0.75 * neg * (-1 if a > 0.55 else 1)          # > 0: inner corners up
     c = S / 2
     # robot faces the viewer: gaze toward the robot's left = the viewer's right
     gx = c + float(state.get("gaze") or 0.0) * 26
     # look down when unpleasant or low-energy, a little up when alert
     gy = c + 10 * neg + 8 * max(0.0, -a) - 6 * max(0.0, a)
-    pupil_r = iris_r * (0.38 + 0.12 * a)                    # dilates with arousal
+    # pupils: wide on unpleasant arousal (tense), small and focused on pleasant
+    # or neutral arousal (alert, excited: big pupils there read as a jump scare)
+    pupil_r = iris_r * (0.38 + 0.12 * a if v < 0 else 0.38 - 0.12 * hi_a + 0.08 * lo_a)
     bulge = 40 * pos                                        # smiling lower lid
     sparkle = min(1.0, 3 * pos * max(0.0, a))               # extra glint when excited
     colour = np.array(_hex(state.get("colour") or "#8FD4E8"), np.float32)

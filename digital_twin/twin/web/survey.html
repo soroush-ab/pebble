@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pebble Emotion Survey</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b2430; --muted: #5d6b7c; --line: #dde2e8;
+    --accent: #2f6fde; --accent-ink: #ffffff; --chosen: #e7efff; --ok: #1f8a4c; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11151b; --card: #1a2029; --ink: #e8edf3; --muted: #9aa8b8; --line: #2c3541;
+            --accent: #5b8ff0; --accent-ink: #0d1117; --chosen: #22324d; --ok: #4fbf7f; --warn: #e0a84a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .hidden { display: none !important; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  input[type=text], select { width: 100%; padding: 11px 12px; font: inherit; color: var(--ink);
+         background: var(--bg); border: 1px solid var(--line); border-radius: 9px; }
+  .check { display: flex; gap: 10px; align-items: center; font-weight: 400; margin-top: 12px; }
+  .check input { width: 20px; height: 20px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--card); color: var(--ink); padding: 12px 16px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+             font-weight: 600; padding: 13px 22px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+  .row .grow { flex: 1; }
+  .status { font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .status.ok::before { content: "●"; color: var(--ok); margin-right: 6px; }
+  .status.bad::before { content: "●"; color: var(--warn); margin-right: 6px; }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0 18px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .prompt { font-size: 24px; font-weight: 650; margin: 0 0 4px; }
+  .hint { color: var(--muted); margin: 0 0 18px; min-height: 1.4em; }
+  .choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .choices button { min-height: 64px; font-weight: 550; }
+  .choices button.on, .scale button.on { background: var(--chosen); border-color: var(--accent);
+                                         box-shadow: inset 0 0 0 1px var(--accent); }
+  .unsure { grid-column: 1 / -1; min-height: 48px !important; font-weight: 400 !important; color: var(--muted); }
+  .scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .scale button { padding: 12px 0; }
+  .scale-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; margin-top: 4px; }
+  textarea { width: 100%; min-height: 54px; padding: 10px 12px; font: inherit; color: var(--ink);
+             background: var(--bg); border: 1px solid var(--line); border-radius: 9px; resize: vertical; }
+  .big { font-size: 20px; }
+  a { color: var(--accent); }
+  @media (max-width: 520px) { .choices { grid-template-columns: repeat(2, 1fr); } .prompt { font-size: 21px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Pebble Emotion Survey</h1>
+      <p class="sub">What does the robot seem to feel?</p>
+    </div>
+    <span id="conn" class="status bad">connecting</span>
+  </header>
+
+  <!-- 1. experimenter setup -->
+  <section id="setup" class="card">
+    <label for="pid">Participant ID</label>
+    <input id="pid" type="text" autocomplete="off">
+    <label for="char">Character shell</label>
+    <select id="char"></select>
+    <label for="cond">Condition</label>
+    <select id="cond">
+      <option value="robot">Physical robot</option>
+      <option value="twin">Digital twin (screen)</option>
+    </select>
+    <label class="check"><input id="withMotion" type="checkbox" checked> Include head movement</label>
+    <label class="check"><input id="withMild" type="checkbox"> Also show mild versions (17 instead of 9)</label>
+    <div class="row">
+      <span class="grow"></span>
+      <button id="start" class="primary" disabled>Start</button>
+    </div>
+  </section>
+
+  <!-- 2. instructions for the participant -->
+  <section id="intro" class="card hidden">
+    <p class="prompt">Thanks for taking part.</p>
+    <p>Pebble will show you a series of feelings, one at a time, with its eyes and its head.
+       For each one, <b>watch Pebble</b>, then choose the word that fits best and say how sure
+       you are. There are no right or wrong answers. You can ask to see a feeling again.</p>
+    <div class="row"><span class="grow"></span><button id="begin" class="primary">Begin</button></div>
+  </section>
+
+  <!-- 3. trials -->
+  <section id="trial" class="card hidden">
+    <div class="status" id="count"></div>
+    <div class="progress"><div id="bar"></div></div>
+    <p class="prompt">What is Pebble feeling?</p>
+    <p class="hint" id="hint"></p>
+    <div class="choices" id="choices"></div>
+    <label>How sure are you?</label>
+    <div class="scale" id="scale"></div>
+    <div class="scale-ends"><span>Just guessing</span><span>Very sure</span></div>
+    <label for="comment">Anything to add? <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+    <textarea id="comment"></textarea>
+    <div class="row">
+      <button id="again">Show again</button>
+      <span class="grow"></span>
+      <button id="next" class="primary" disabled>Next</button>
+    </div>
+  </section>
+
+  <!-- 4. done -->
+  <section id="done" class="card hidden">
+    <p class="prompt">All done. Thank you!</p>
+    <p id="saved" class="big"></p>
+    <p id="files"></p>
+    <div class="row"><span class="grow"></span><button id="restart" class="primary">Next participant</button></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const WATCH_MS = 2000;          // answers unlock after this, so people watch first
+const REST_MS = 1300;           // neutral pause between expressions
+
+let cfg = null, ws = null, plan = [], idx = 0, trials = [], cur = null;
+
+// ---- link to the robot (through the twin, like the 3D viewer) --------------
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/viewer`);
+  ws.onopen = () => { $('conn').textContent = 'robot connected'; $('conn').className = 'status ok'; ready(); };
+  ws.onclose = () => { $('conn').textContent = 'reconnecting'; $('conn').className = 'status bad';
+                       ready(); setTimeout(connect, 1500); };
+  ws.onmessage = () => {};      // pose frames: not needed here
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+const ready = () => { $('start').disabled = !(cfg && ws && ws.readyState === 1); };
+
+async function loadConfig() {
+  cfg = await (await fetch('/survey/config')).json();
+  $('char').innerHTML = cfg.characters.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  $('choices').innerHTML = cfg.choices.map(c => `<button data-id="${c.id}">${c.label}</button>`).join('')
+    + `<button class="unsure" data-id="unsure">Not sure</button>`;
+  $('scale').innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-n="${n}">${n}</button>`).join('');
+  $('pid').value = 'P' + new Date().toISOString().slice(5, 16).replace(/[-T:]/g, '');
+  ready();
+}
+
+// ---- flow ------------------------------------------------------------------
+function show(section) {
+  for (const s of ['setup', 'intro', 'trial', 'done']) $(s).classList.toggle('hidden', s !== section);
+}
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+$('start').onclick = () => {
+  const mild = $('withMild').checked;
+  plan = shuffle(cfg.stimuli.filter(s => mild || s.intensity !== 'mild').map(s => ({ ...s })));
+  trials = []; idx = 0;
+  send({ type: 'shell', id: $('char').value });
+  show('intro');
+};
+$('begin').onclick = () => { show('trial'); runTrial(); };
+
+async function present(s) {
+  send({ type: 'show_affect', valence: s.valence, arousal: s.arousal, motion: $('withMotion').checked });
+}
+
+async function runTrial() {
+  const s = plan[idx];
+  cur = { stimulus: s.id, shown: s.emotion, intensity: s.intensity, valence: s.valence,
+          arousal: s.arousal, motion: $('withMotion').checked ? cfg.motions[s.emotion] : '',
+          answer: '', confidence: '', replays: 0, shownAt: 0, answeredAt: 0 };
+  $('count').textContent = `${idx + 1} of ${plan.length}`;
+  $('bar').style.width = `${100 * idx / plan.length}%`;
+  $('comment').value = '';
+  for (const b of document.querySelectorAll('#choices button, #scale button')) { b.classList.remove('on'); b.disabled = true; }
+  $('next').disabled = true; $('again').disabled = true;
+  $('hint').textContent = 'Get ready…';
+  send({ type: 'show_affect', valence: 0, arousal: 0, motion: false });   // start from neutral
+  await sleep(REST_MS);
+  $('hint').textContent = 'Watch Pebble.';
+  await present(s);
+  cur.shownAt = performance.now();
+  await sleep(WATCH_MS);
+  for (const b of document.querySelectorAll('#choices button, #scale button')) b.disabled = false;
+  $('again').disabled = false;
+  $('hint').textContent = 'Choose the word that fits best.';
+}
+
+$('choices').onclick = e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  for (const x of $('choices').children) x.classList.toggle('on', x === b);
+  cur.answer = b.dataset.id;
+  if (!cur.answeredAt) cur.answeredAt = performance.now();
+  $('next').disabled = !(cur.answer && cur.confidence);
+};
+$('scale').onclick = e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  for (const x of $('scale').children) x.classList.toggle('on', x === b);
+  cur.confidence = +b.dataset.n;
+  $('next').disabled = !(cur.answer && cur.confidence);
+};
+$('again').onclick = async () => {
+  cur.replays++;
+  $('again').disabled = true;
+  send({ type: 'show_affect', valence: 0, arousal: 0, motion: false });
+  await sleep(700);
+  await present(plan[idx]);
+  await sleep(WATCH_MS);
+  $('again').disabled = false;
+};
+$('next').onclick = async () => {
+  trials.push({
+    stimulus: cur.stimulus, shown: cur.shown, intensity: cur.intensity, valence: cur.valence,
+    arousal: cur.arousal, motion: cur.motion, answer: cur.answer, confidence: cur.confidence,
+    response_time_s: ((cur.answeredAt - cur.shownAt) / 1000).toFixed(2), replays: cur.replays,
+    comment: $('comment').value.trim(), timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+  });
+  idx++;
+  if (idx < plan.length) return runTrial();
+  send({ type: 'show_affect', valence: 0, arousal: 0, motion: false });
+  $('bar').style.width = '100%';
+  await finish();
+};
+
+async function finish() {
+  show('done');
+  $('saved').textContent = 'Saving…'; $('files').textContent = '';
+  const body = { participant: $('pid').value.trim() || 'anonymous', character: $('char').value,
+                 condition: $('cond').value, with_motion: $('withMotion').checked, trials };
+  try {
+    const r = await (await fetch('/survey/results', { method: 'POST', body: JSON.stringify(body) })).json();
+    if (!r.ok) throw new Error(r.error);
+    $('saved').textContent = `Saved ${r.saved} answers.`;
+    $('files').innerHTML = 'Results so far: ' + r.files.map(f => `<a href="${f}" download>${f.split('/').pop()}</a>`).join(' · ');
+  } catch (err) {
+    $('saved').textContent = 'Could not save: ' + err.message + '. Answers are kept below.';
+    $('files').textContent = JSON.stringify(body);
+  }
+}
+$('restart').onclick = () => { $('pid').value = 'P' + new Date().toISOString().slice(5, 16).replace(/[-T:]/g, ''); show('setup'); };
+
+loadConfig();
+connect();
+</script>
+</body>
+</html>

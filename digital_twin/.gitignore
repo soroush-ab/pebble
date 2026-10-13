@@ -16,3 +16,6 @@ ros2_ws/src/pebble_description/meshes/
 
 # Home Assistant device registration (holds the webhook id)
 config/ha_device.json
+
+# emotion survey answers (participant data): keep local, share the report deliberately
+survey/
