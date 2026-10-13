@@ -333,6 +333,44 @@ class TwinHA(HomeAssistantClient):
                             "valence": -0.5, "arousal": 0.3})
 
 
+class RobotMic:
+    """The robot's own mic: PCM16 LE 16 kHz mono arriving as binary frames
+    between `vad` start and stop. Same start/stop shape as MicRecorder."""
+
+    rate = 16000
+    TAIL_S = 0.4          # audio still in flight when the stop message arrives
+
+    def __init__(self):
+        self.chunks, self.active = [], False
+
+    def start(self):
+        self.chunks, self.active = [], True
+
+    def feed(self, data):
+        if self.active:
+            self.chunks.append(data)
+
+    def stop(self):
+        if not self.active:
+            return None
+        time.sleep(self.TAIL_S)
+        self.active = False
+        import numpy as np
+        pcm = np.frombuffer(b"".join(self.chunks), dtype="<i2").astype(np.float32) / 32768
+        dump = os.environ.get("PEBBLE_MIC_DUMP")          # debugging: keep each capture
+        if dump and pcm.size:
+            import wave
+            os.makedirs(dump, exist_ok=True)
+            with wave.open(os.path.join(dump, f"robot_mic_{int(time.time())}.wav"), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(self.rate)
+                w.writeframes(b"".join(self.chunks))
+        if pcm.size:
+            pcm -= pcm.mean()                  # MEMS mics carry a DC offset
+            log.info("robot mic: %.1f s, rms %.4f, peak %.3f", pcm.size / self.rate,
+                     float(np.sqrt(np.mean(pcm ** 2))), float(np.abs(pcm).max()))
+        return pcm, self.rate
+
+
 class MicRecorder:
     """Records from this machine's mic between `vad` start and stop.
 
@@ -533,9 +571,10 @@ def main():
     ap.add_argument("--twin", default=TWIN, help="robot/twin brain WebSocket URL")
     ap.add_argument("--voice", action="store_true",
                     help="speak replies with Piper in the character's voice")
-    ap.add_argument("--mic", action="store_true",
-                    help='record this machine\'s mic while "Hold to speak" is held, '
-                         "transcribe with whisper")
+    ap.add_argument("--mic", nargs="?", const="laptop", choices=("laptop", "robot"),
+                    help='speech input while "Hold to speak" is held: this machine\'s '
+                         'mic (default), or "robot" for the robot\'s own mic, streamed '
+                         "by the robot as binary frames")
     ap.add_argument("--audio-device", help="mic/speaker index or name (see "
                                            "`python -m sounddevice`)")
     # base.en: 0.8 s per sentence on this laptop's CPU vs 4.1 s for small.en,
@@ -576,7 +615,7 @@ def main():
         piper = PiperSpeaker(device=args.audio_device)
     if args.mic:
         from stt import SpeechToText
-        mic = MicRecorder(args.audio_device)
+        mic = RobotMic() if args.mic == "robot" else MicRecorder(args.audio_device)
         print("loading whisper (first run downloads it into ../speech/models) ...")
         stt = SpeechToText(args.stt_model, n_threads=min(8, os.cpu_count() or 1))
         print(f"  STT {stt.model_name}, mic at {mic.rate} Hz")
@@ -738,7 +777,15 @@ def main():
         link.conn = conn
         try:
             while True:
-                msg = conn.recv_json()
+                raw = conn.recv()
+                if isinstance(raw, bytes):           # audio from the robot's mic
+                    if isinstance(mic, RobotMic):
+                        mic.feed(raw)
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except ValueError:
+                    continue
                 if not msg:
                     continue
                 kind = msg.get("type")
@@ -757,9 +804,11 @@ def main():
                     if mic:
                         mic.start()
                 elif kind == "vad" and mic:
-                    rec = mic.stop()
-                    if rec is not None:
-                        jobs.put(("mic", rec))
+                    def finish():                    # RobotMic waits for its tail
+                        rec = mic.stop()
+                        if rec is not None:
+                            jobs.put(("mic", rec))
+                    threading.Thread(target=finish, daemon=True).start()
         except (ws.WSClosed, ConnectionError, OSError):
             link.conn = None
             print("robot disconnected; reconnecting")

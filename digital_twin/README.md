@@ -33,6 +33,30 @@ python3 examples/brain_stub.py      # (optional) reference brain, second termina
 
 Open <http://localhost:8730/>.
 
+### Driving the physical robot
+
+```bash
+python3 twin/run.py --robot                  # eyes + RFID; the ESP32 dials in on :9000
+python3 twin/run.py --robot --robot-motion   # + neck servos (capped, see below)
+uv run --env-file ../LLM2/.env brain/llm2_brain.py --local --mic robot --voice --ha-device
+```
+
+The twin's MCU logic drives the real robot (firmware in `Pebble MCU`) through
+`twin/robot.py`; the brain and the viewer can't tell the difference.
+
+- **Eyes:** every expression × blink stage × character is rendered here and
+  uploaded once per connection into the ESP32's PSRAM (~3 MB, ~10 s;
+  the fitted character first, ~4 s). Afterwards only frame ids cross Wi-Fi: a
+  blink is one `ANIM` command timed on the robot, so both eyes stay in step.
+  Affect snaps to the nearest of 9 Russell anchors; gaze isn't shown on the robot.
+- **Neck:** head pose → linkage → servo setpoints, with per-servo sign, the
+  A/B swap, a ±25° cap and a 150°/s limit from `config/robot_hw.yaml`
+  (measured on the built robot). A board reboot (brownout) disables motion.
+- **Mic:** while *Hold to speak* is held, the robot's INMP441 (Philips I2S,
+  left slot) streams to the brain as binary frames; `--mic robot` transcribes it.
+- Not yet: the base (not installed), RFID (reader not detected), a speaker on
+  the robot (voice plays on the PC).
+
 ### With the real LLM brain (`../LLM2`)
 
 `brain/llm2_brain.py` replaces the stub with the team's LLM2 pipeline, unmodified:

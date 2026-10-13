@@ -1,0 +1,41 @@
+# Calibration of the PHYSICAL robot, used by twin/robot.py (`twin/run.py --robot`).
+# Everything here was measured on the built robot; the twin itself ignores it.
+
+displays:
+  # GC9A01 panels want RGB565 high byte first, whatever proto.h says.
+  byteorder: big
+  # Firmware display index of each eye (robot's own left/right).
+  left_eye: 0
+  right_eye: 1
+  # Both panels are mounted turned 90 degrees, the right one 180 degrees from
+  # the left. Images are drawn as seen by someone FACING the robot, then mapped:
+  #   left eye:  panel = view[:, ::-1].T      right eye: panel = view[::-1, :].T
+  # (verified 2026-10-13: white top, red dot on the viewer's left, both eyes)
+  fps: 15
+
+servos:
+  # Firmware channel X gets:  sign * (twin linkage angle) + offset   (-90..+90, 0 = 1500 us)
+  # Measured 2026-10-13 by moving each channel alone and both together:
+  #   channel A +12 -> robot's left side down;  channel B +12 -> right side up
+  #   A -12 & B +12 -> looks up;  A +12 & B +12 -> tilts to the robot's left
+  # The twin's +roll also tilts to the robot's left, so channel A is the twin's
+  # servo_b (and B is servo_a), with A mirrored.
+  swap: true              # firmware A <- twin servo_b, firmware B <- twin servo_a
+  a: {sign: -1, offset_deg: 0.0}
+  b: {sign: 1, offset_deg: 0.0}
+  # Hard cap on |servo - offset|. 25 covers the authored motions (a nod is
+  # ~22 deg of servo, a head tilt ~26); robot.yaml's limits are CAD estimates.
+  limit_deg: 25.0
+  max_rate_dps: 150.0
+  rate_hz: 25
+
+mic:
+  # INMP441 with L/R tied to GND -> data in the LEFT I2S slot. The firmware
+  # streams both slots (Philips I2S, stereo); the bridge forwards this one.
+  channel: left
+  # Software gain before the brain's STT. The INMP441 is quiet at speaking
+  # distance (-26 dBFS at 94 dB SPL, so speech at ~0.5 m is around -55 dBFS).
+  gain_db: 0
+
+base:
+  installed: false        # no base motor yet: never enabled, always 0 deg

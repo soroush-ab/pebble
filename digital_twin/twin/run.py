@@ -165,6 +165,12 @@ def main():
     ap = argparse.ArgumentParser(description="Pebble digital twin")
     ap.add_argument("--port", type=int, default=8730)
     ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--robot", nargs="?", const=9000, type=int, metavar="PORT",
+                    help="also drive the PHYSICAL robot: listen for its ESP32 on PORT "
+                         "(default 9000); eyes + RFID, servos only with --robot-motion")
+    ap.add_argument("--robot-motion", action="store_true",
+                    help="with --robot: move the real neck servos (capped, see "
+                         "config/robot_hw.yaml)")
     ap.add_argument("--validate", action="store_true",
                     help="check motions against joint limits and exit")
     args = ap.parse_args()
@@ -180,16 +186,34 @@ def main():
 
     httpd = serve(m, args.host, args.port)
 
+    bridge = None
+    if args.robot:
+        import logging
+        import robot as robot_mod
+        import robot_link
+        logging.basicConfig(level=logging.INFO, format="  %(name)s: %(message)s")
+        bridge = robot_mod.RobotBridge(m, robot_link.RobotLink(args.robot),
+                                       motion=args.robot_motion)
+        bridge.start()
+
     print(f"Pebble digital twin  fw={mcu_mod.FW_VERSION}  {m.tick_hz:.0f} Hz")
     print(f"  viewer   http://localhost:{args.port}/")
     print(f"  brain    ws://localhost:{args.port}/brain")
     print(f"  shells   {', '.join(sorted(m.characters))}")
+    if bridge:
+        print(f"  robot    ESP32 -> :{args.robot}  eyes+RFID"
+              + (f", servos capped at +/-{bridge.limit:g} deg" if args.robot_motion
+                 else ", servos OFF (add --robot-motion)"))
     print("Ctrl-C to stop.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopping")
     finally:
+        if bridge:
+            bridge.stop.set()
+            if bridge.motion_on:
+                bridge.park()
         stop.set()
         httpd.shutdown()
 

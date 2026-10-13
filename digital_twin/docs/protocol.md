@@ -9,8 +9,11 @@ tell the twin from the physical robot, which is the entire point.
 ws://<twin-or-robot>:8730/brain
 ```
 
-Binary frames are reserved for audio (Opus, 48 kHz mono). The twin does not
-send them; the real firmware will.
+Binary frames carry audio. From the robot: its own mic while the user is
+speaking (between `vad` true and false), as raw **PCM16 LE, 16 kHz mono**:
+the twin's robot mode (`twin/run.py --robot`) forwards the physical robot's
+I2S mic this way, and `brain/llm2_brain.py --mic robot` transcribes it. (Opus
+would cut the bandwidth ~10x if the link ever needs it.)
 
 ---
 
