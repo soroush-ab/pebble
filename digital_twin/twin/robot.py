@@ -61,7 +61,11 @@ def render_eye(state, inner_on_left, bezel=True):
     c = S / 2
     # robot faces the viewer: gaze toward the robot's left = the viewer's right
     gx = c + float(state.get("gaze") or 0.0) * 26
-    gy = c + 10 * neg
+    # look down when unpleasant or low-energy, a little up when alert
+    gy = c + 10 * neg + 8 * max(0.0, -a) - 6 * max(0.0, a)
+    pupil_r = iris_r * (0.38 + 0.12 * a)                    # dilates with arousal
+    bulge = 40 * pos                                        # smiling lower lid
+    sparkle = min(1.0, 3 * pos * max(0.0, a))               # extra glint when excited
     colour = np.array(_hex(state.get("colour") or "#8FD4E8"), np.float32)
 
     y, x = np.mgrid[0:S, 0:S].astype(np.float32) + 0.5
@@ -74,8 +78,13 @@ def render_eye(state, inner_on_left, bezel=True):
     alpha = (0.8 * (1 - t))[..., None] * (d < 2.3 * iris_r)[..., None]
     img = img * (1 - alpha) + colour * alpha
     img[d < iris_r] = colour
+    img[d < pupil_r] = (0x06, 0x09, 0x0D)
     hl = np.hypot(x - (gx - 0.3 * iris_r), y - (gy - 0.34 * iris_r)) < 0.21 * iris_r
     img[hl] = img[hl] * 0.15 + 255 * 0.85
+    if sparkle > 0.05:
+        sp = np.hypot(x - (gx + 0.32 * iris_r), y - (gy + 0.3 * iris_r)) < 0.1 * iris_r
+        k = 0.85 * sparkle
+        img[sp] = img[sp] * (1 - k) + 255 * k
 
     # upper lid: everything above a line through (c, top_y), tilted so the
     # inner corner sits higher when tilt > 0
@@ -83,7 +92,9 @@ def render_eye(state, inner_on_left, bezel=True):
     th = tilt if inner_on_left else -tilt
     img[y * np.cos(th) - (x - c) * np.sin(th) < top_y] = BG       # = canvas rotate(th)
     bot_y = S * (1 - lid_bot - (1 - openness) * 0.48 - squint * 0.3)
-    img[y >= bot_y] = BG
+    # lower lid: a parabola peaking `bulge` px above bot_y at the centre (= the
+    # viewer's quadraticCurveTo with the control point at 2x bulge)
+    img[y >= bot_y - bulge * (1 - ((x - c) / c) ** 2)] = BG
 
     if bezel:
         r = np.hypot(x - c, y - c)
@@ -96,10 +107,20 @@ def render_eye(state, inner_on_left, bezel=True):
 # robot can show is rendered here and uploaded once per connection; afterwards
 # only frame ids cross Wi-Fi. Continuous affect snaps to the nearest of these
 # Russell-circumplex anchors (the same octants as LLM2/affect.py).
-ANCHORS = [("neutral", 0.0, 0.0), ("happy", 0.7, 0.0), ("excited", 0.5, 0.5),
-           ("alert", 0.0, 0.7), ("tense", -0.5, 0.5), ("sad", -0.7, 0.0),
-           ("depressed", -0.5, -0.5), ("sleepy", 0.0, -0.7), ("calm", 0.5, -0.5)]
-BLINK_STAGES = (0.0, 0.33, 0.66)           # open, then partly closed
+def _anchors():
+    """Neutral, then every octant at a mild and a strong intensity: 17 faces."""
+    import math
+    out = [("neutral", 0.0, 0.0)]
+    for deg, name in ((0, "happy"), (45, "excited"), (90, "alert"), (135, "tense"),
+                      (180, "sad"), (225, "depressed"), (270, "sleepy"), (315, "calm")):
+        for level, r in (("mild", 0.45), ("strong", 0.9)):
+            out.append((f"{level} {name}", round(r * math.cos(math.radians(deg)), 3),
+                        round(r * math.sin(math.radians(deg)), 3)))
+    return out
+
+
+ANCHORS = _anchors()
+BLINK_STAGES = (0.0, 0.5)                  # open, half closed (+ the shared closed frame)
 CLOSED = (1000, 1001)                      # fully closed is the same for every face
 
 
@@ -327,10 +348,10 @@ class RobotBridge:
         ei = nearest_anchor(e["valence"], e["arousal"])
         blink = float(e["blink"])
         if blink > self._last_blink + 0.2:       # rose: a blink began (it decays fast)
-            # a new blink: closed -> 2/3 -> 1/3 -> open, timed on the robot
+            # a new blink: closed -> half -> open, timed on the robot
             steps = [CLOSED] + [(frame_id(ci, ei, si, 0), frame_id(ci, ei, si, 1))
-                                for si in (2, 1, 0)]
-            self.link.frame_anim(steps, max(20, blink_ms // 3))
+                                for si in reversed(range(len(BLINK_STAGES)))]
+            self.link.frame_anim(steps, max(20, blink_ms // len(BLINK_STAGES)))
             self._shown = (ci, ei)
         elif (ci, ei) != self._shown:
             self.link.frame_show(frame_id(ci, ei, 0, 0), frame_id(ci, ei, 0, 1))

@@ -139,3 +139,127 @@ motions:
         - {t: 0.0, pos:   0.0}
         - {t: 1.4, pos: -16.0, absolute: true}
     easing: ease_in
+
+  # ---- Russell circumplex: one body-language motion per octant -------------
+  # The brain picks these from the emotion's octant (brain/llm2_brain.py,
+  # OCTANT_MOTION) and scales them: faster with arousal, bigger with intensity.
+  # Amplitudes are kept small enough to survive Baymax's 1.3x amplitude and the
+  # real robot's +/-25 deg servo cap (config/robot_hw.yaml).
+
+  happy_bounce:
+    description: Pleased / glad (valence +). Two small, quick lifts of the head.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos: 0.0}
+        - {t: 0.15, pos: 4.0}
+        - {t: 0.30, pos: 0.0}
+        - {t: 0.45, pos: 3.0}
+        - {t: 0.65, pos: 0.0}
+
+  excited_wiggle:
+    description: Excited / delighted (valence +, arousal +). Head up, quick
+      side-to-side wiggle.
+    channels:
+      head_roll:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.12, pos:   6.0}
+        - {t: 0.26, pos:  -6.0}
+        - {t: 0.40, pos:   4.5}
+        - {t: 0.54, pos:  -2.5}
+        - {t: 0.70, pos:   0.0}
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.12, pos:   3.5}
+        - {t: 0.55, pos:   3.5}
+        - {t: 0.75, pos:   0.0}
+
+  perk_up:
+    description: Alert / attentive (arousal +). Lifts the head and holds it,
+      listening.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.25, pos:   5.5}
+        - {t: 1.60, pos:   5.5}
+        - {t: 2.20, pos:   0.0}
+      head_roll:
+        - {t: 0.00, pos:   0.0}
+        - {t: 0.25, pos:   2.5}
+        - {t: 1.60, pos:   2.5}
+        - {t: 2.20, pos:   0.0}
+    easing: ease_out
+
+  recoil:
+    description: Tense / alarmed / annoyed (valence -, arousal +). A quick pull
+      back with a small tremble, then a slow recovery.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos: 0.0}
+        - {t: 0.12, pos: 6.0}
+        - {t: 0.90, pos: 5.0}
+        - {t: 1.80, pos: 0.0}
+      head_roll:
+        - {t: 0.00, pos:  0.0}
+        - {t: 0.20, pos:  2.0}
+        - {t: 0.30, pos: -2.0}
+        - {t: 0.40, pos:  2.0}
+        - {t: 0.50, pos: -1.0}
+        - {t: 0.60, pos:  0.0}
+
+  droop:
+    description: Sad (valence -). The head drops slowly, stays low, and lifts
+      again reluctantly.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 1.20, pos:  -5.5}
+        - {t: 2.60, pos:  -5.5}
+        - {t: 3.60, pos:   0.0}
+      head_roll:
+        - {t: 0.00, pos:   0.0}
+        - {t: 1.20, pos:  -2.5}
+        - {t: 2.60, pos:  -2.5}
+        - {t: 3.60, pos:   0.0}
+    easing: s_curve
+
+  sag:
+    description: Depressed / gloomy / bored (valence -, arousal -). A long,
+      heavy sag to one side.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 1.80, pos:  -4.5}
+        - {t: 3.80, pos:  -4.5}
+        - {t: 5.00, pos:   0.0}
+      head_roll:
+        - {t: 0.00, pos:   0.0}
+        - {t: 1.80, pos:   4.0}
+        - {t: 3.80, pos:   4.0}
+        - {t: 5.00, pos:   0.0}
+    easing: s_curve
+
+  doze:
+    description: Sleepy / tired (arousal -). Nods off, catches itself, settles.
+    channels:
+      head_pitch:
+        - {t: 0.00, pos:   0.0}
+        - {t: 1.60, pos:  -7.0}
+        - {t: 1.85, pos:  -1.5}
+        - {t: 2.60, pos:  -4.0}
+        - {t: 3.40, pos:   0.0}
+
+  sway:
+    description: Calm / content / relaxed (valence +, arousal -). A slow,
+      gentle sway.
+    channels:
+      head_roll:
+        - {t: 0.00, pos:  0.0}
+        - {t: 1.20, pos:  4.0}
+        - {t: 2.60, pos: -4.0}
+        - {t: 3.60, pos:  0.0}
+      head_pitch:
+        - {t: 0.00, pos: 0.0}
+        - {t: 1.20, pos: 1.5}
+        - {t: 2.60, pos: 1.5}
+        - {t: 3.60, pos: 0.0}
+    easing: s_curve

@@ -79,17 +79,30 @@ LOCAL_LLM = os.environ.get("PEBBLE_LOCAL_LLM", "http://127.0.0.1:9931/v1")
 # by the octant and scaled by the point: arousal -> faster, intensity -> bigger.
 # On top of that the MCU applies the character's own scaling (characters/*.json),
 # so the same nod reads slow and large on Baymax, small and quick on R2-D2.
-OCTANT_MOTION = {
+OCTANT_MOTION = {                  # one body language per octant (motions.yaml)
     "neutral":   "ack_nod",
-    "happy":     "confirm_nod",
-    "calm":      "confirm_nod",
-    "excited":   "head_tilt",
-    "alert":     "head_tilt",
-    "tense":     "concern_lean",     # very unpleasant + very aroused: shake_no
-    "sad":       "concern_lean",
-    "depressed": "concern_lean",
-    "sleepy":    "settle",
+    "happy":     "happy_bounce",
+    "excited":   "excited_wiggle",
+    "alert":     "perk_up",
+    "tense":     "recoil",           # very unpleasant + very aroused: shake_no
+    "sad":       "droop",
+    "depressed": "sag",
+    "sleepy":    "doze",
+    "calm":      "sway",
 }
+# Head gestures the model may ask for (robot.gesture), described in words a
+# small model maps requests onto. Only those the robot reports in `hello`.
+GESTURE_HINTS = {
+    "ack_nod": "one nod: yes / I heard you", "confirm_nod": "double nod: done, agreed",
+    "head_tilt": "curious head tilt", "concern_lean": "lean in, concerned",
+    "shake_no": "shake: no", "scan_room": "look around the room",
+    "settle": "settle back to rest", "wake": "wake up", "sleep": "go to sleep",
+    "happy_bounce": "happy little bounce", "excited_wiggle": "excited wiggle",
+    "perk_up": "perk up, attentive", "recoil": "startled pull back",
+    "droop": "sad droop", "sag": "gloomy sag", "doze": "nod off sleepily",
+    "sway": "calm, gentle sway",
+}
+
 EYE_PRESETS = {"neutral": (0.0, 0.0), "attentive": (0.2, 0.5), "concerned": (-0.5, 0.3),
                "confirming": (0.7, 0.1), "sleep": (0.0, -1.0)}       # = twin/mcu.py
 
@@ -124,6 +137,8 @@ class TwinFace(Face):
     def __init__(self, link, device=None):
         self.link, self.device = link, device
 
+    skip_motion = False         # a requested gesture replaces the emotion's motion
+
     def show_emotion(self, affect):
         if self.device:
             threading.Thread(target=self.device.update_sensor, daemon=True, args=(
@@ -131,8 +146,10 @@ class TwinFace(Face):
                 {"valence": affect.valence, "arousal": affect.arousal,
                  "intensity": round(affect.intensity, 3), "model": "Russell circumplex"},
             )).start()
-        for msg in affect_actions(affect):
-            self.link.send(msg)
+        eyes, move = affect_actions(affect)
+        self.link.send(eyes)
+        if not self.skip_motion:
+            self.link.send(move)
 
 
 class TwinSpeaker(Speaker):
@@ -443,7 +460,9 @@ def tune_for_local(client):
 
     def fast_create(**kw):
         kw.setdefault("max_tokens", 400)
-        kw["extra_body"] = {"thinking_budget_tokens": 0, **(kw.get("extra_body") or {})}
+        # repeat_penalty: Gemma E4B sometimes loops ("I am here. I am here. ...")
+        kw["extra_body"] = {"thinking_budget_tokens": 0, "repeat_penalty": 1.15,
+                            **(kw.get("extra_body") or {})}
         return create(**kw)
 
     client.chat.completions.create = fast_create
@@ -455,6 +474,8 @@ class Pipeline(LLM2Pipeline):
     Chinese, so smaller models answer in Chinese."""
 
     reply_language = ""
+    gestures = {}               # motion id -> description, from the robot's hello
+    link = None                 # to send gestures to the robot
     entity_source = None        # callable -> {entity_id: description}, e.g. from HA
 
     def _load_entities(self):
@@ -521,7 +542,9 @@ class Pipeline(LLM2Pipeline):
         "To do something later (\"in 5 seconds\", \"after 10 minutes\"), add "
         "\"delay_s\": <seconds> to that action's data_json, and give each step its own "
         "action: e.g. light.turn_off now, then light.turn_on with {\"delay_s\": 5}. "
-        "Only say something will happen later if you emitted the delayed action.")
+        "Only say something will happen later if you emitted the delayed action."
+        "\nIf you asked the user to confirm something and they agree (yes, sure, ok, "
+        "please, go ahead), do it now: emit that action in this reply.")
 
     reminder_list = None        # where Pebble may add reminders (None: it can't)
 
@@ -538,9 +561,44 @@ class Pipeline(LLM2Pipeline):
             f"pills, doses or any health treatment: say that for safety a carer or family "
             f"member has to add those in Home Assistant.")
 
+    def body_rules(self):
+        """Small models answer "I have no head" unless told what the body is."""
+        rules = ("\nYour body: a small desk robot with two round eye displays that show "
+                 "your feelings, and a head that can nod, tilt, lean and shake. You have no "
+                 "arms, legs or camera and cannot search the internet; your voice and your "
+                 "head are how you act, plus the home devices listed.")
+        if self.gestures:
+            listed = "; ".join(f"{k} ({v})" for k, v in self.gestures.items())
+            rules += (f"\nTo move your head, add one ha_action: service \"robot.gesture\", "
+                      f"entity_id \"robot.head\", data_json {{\"name\": \"<gesture>\"}}. "
+                      f"Gestures: {listed}. Do one when asked to move, or to underline a reply.")
+        return rules
+
+    def _dispatch(self, out):
+        """Gestures play WITH the reply (LLM2 runs actions after speaking), and
+        replace the motion the emotion would have picked."""
+        moves = [a for a in out.ha_actions if a.service == "robot.gesture"]
+        if moves:
+            data = TwinHA._data(moves[0]) or {}
+            name = str(data.get("name", "")).strip()
+            if name in self.gestures and self.link:
+                self.face.skip_motion = True
+                self.link.send({"type": "motion", "id": name})
+                print(f"  gesture: {name}")
+            else:
+                log.warning("unknown gesture %r", name)
+                self.ha.failed += 1
+            out = out.model_copy(update={"ha_actions": [a for a in out.ha_actions
+                                                        if a.service != "robot.gesture"]})
+        try:
+            super()._dispatch(out)
+        finally:
+            self.face.skip_motion = False
+
     def set_active_tag(self, nfc_tag_id):
         char = super().set_active_tag(nfc_tag_id)
         with self._lock:
+            self._system_prompt += self.body_rules()
             if self.reply_language:
                 self._system_prompt += (f"\nAlways write tts_text in {self.reply_language}, "
                                         f"in one or two short spoken sentences.")
@@ -643,6 +701,7 @@ def main():
     # when HA decides what is exposed, empty must mean nothing.
     pipe.ha.strict = Pipeline.entity_source is not None
     pipe.ha.device = device
+    Pipeline.link = link
     if device is not None:
         lists = device.todo_lists()
         if args.reminder_list in lists:
@@ -727,11 +786,11 @@ def main():
         Prime it with the home's own device and room names."""
         if stt is None or not pipe.ha_entities:
             return
-        # "soshi desk (Bedroom)" -> device "soshi desk", room "Bedroom". Hyphens
-        # out: primed with "soshi-room", whisper wrote "is soshi-room" as "isshi-room".
+        # "soshi desk - light, in Bedroom" -> device "soshi desk", room "Bedroom".
+        # Hyphens out: primed with "soshi-room", whisper wrote "isshi-room".
         names, rooms = set(), set()
         for desc in pipe.ha_entities.values():
-            m = re.match(r"(.*?)\s*\(([^)]*)\)\s*$", desc)
+            m = re.match(r"(.*?) - [^,]*(?:, in (.*))?$", desc)
             name, room = (m.group(1), m.group(2)) if m else (desc, None)
             names.add(" ".join(re.sub(r"[^\w&']", " ", name).split()))
             if room:
@@ -791,6 +850,8 @@ def main():
                 kind = msg.get("type")
                 if kind == "hello":
                     print(f"connected: fw={msg['fw']}  shell={msg.get('character_id')}")
+                    Pipeline.gestures = {m: GESTURE_HINTS[m] for m in msg.get("motions", [])
+                                         if m in GESTURE_HINTS}
                     select(msg.get("character_id"))
                 elif kind == "tag" and msg.get("present"):
                     select(msg.get("character_id"))

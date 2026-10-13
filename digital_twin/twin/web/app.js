@@ -96,7 +96,12 @@ function drawEye(eye, s) {
   const squint = 0.6 * pos;
   const tilt = 0.75 * neg * (a > 0.55 ? -1 : 1);
 
-  const gx = c + (s.gaze || 0) * 26, gy = c + 10 * neg;
+  // look down when unpleasant or low-energy, a little up when alert
+  const gx = c + (s.gaze || 0) * 26,
+        gy = c + 10 * neg + 8 * Math.max(0, -a) - 6 * Math.max(0, a);
+  const pupilR = irisR * (0.38 + 0.12 * a);                  // dilates with arousal
+  const bulge = 40 * pos;                                    // smiling lower lid
+  const sparkle = Math.min(1, 3 * pos * Math.max(0, a));     // extra glint when excited
 
   // glow
   const g = ctx.createRadialGradient(gx, gy, irisR * 0.2, gx, gy, irisR * 2.3);
@@ -107,9 +112,15 @@ function drawEye(eye, s) {
   // iris + highlight
   ctx.fillStyle = s.colour;
   ctx.beginPath(); ctx.arc(gx, gy, irisR, 0, 7); ctx.fill();
+  ctx.fillStyle = '#06090d';
+  ctx.beginPath(); ctx.arc(gx, gy, pupilR, 0, 7); ctx.fill();
   ctx.fillStyle = '#ffffff';
   ctx.globalAlpha = 0.85;
   ctx.beginPath(); ctx.arc(gx - irisR * 0.3, gy - irisR * 0.34, irisR * 0.21, 0, 7); ctx.fill();
+  if (sparkle > 0.05) {
+    ctx.globalAlpha = 0.85 * sparkle;
+    ctx.beginPath(); ctx.arc(gx + irisR * 0.32, gy + irisR * 0.3, irisR * 0.1, 0, 7); ctx.fill();
+  }
   ctx.globalAlpha = 1;
 
   // eyelids
@@ -118,7 +129,9 @@ function drawEye(eye, s) {
   ctx.save(); ctx.translate(c, 0); ctx.rotate(tilt * (eye === eyeL ? -1 : 1));   // tilt > 0: inner corners up
   ctx.fillRect(-S, -S, S * 2, S + topY); ctx.restore();
   const botY = S * (1 - lidBot - (1 - open) * 0.48 - squint * 0.3);
-  ctx.fillRect(0, botY, S, S - botY);
+  // lower lid: a parabola peaking `bulge` px above botY at the centre
+  ctx.beginPath(); ctx.moveTo(0, S); ctx.lineTo(0, botY);
+  ctx.quadraticCurveTo(c, botY - 2 * bulge, S, botY); ctx.lineTo(S, S); ctx.closePath(); ctx.fill();
 
   // bezel
   ctx.strokeStyle = '#1b222c'; ctx.lineWidth = 8;

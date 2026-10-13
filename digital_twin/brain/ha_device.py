@@ -40,6 +40,15 @@ CONTROL_MESSAGES = re.compile(r"^(clear_notification|remove_channel|request_loca
 READING_CLASSES = {"power", "current", "voltage", "energy", "temperature", "humidity",
                    "battery", "illuminance", "carbon_dioxide", "pm25"}
 
+# (domain, device_class) -> what people call it
+KINDS = {
+    ("switch", "outlet"): "plug", ("switch", None): "switch", ("light", None): "light",
+    ("media_player", "tv"): "TV", ("media_player", "speaker"): "speaker",
+    ("media_player", None): "media player", ("fan", None): "fan", ("cover", None): "blind",
+    ("climate", None): "heater/thermostat", ("scene", None): "scene",
+    ("input_boolean", None): "toggle",
+}
+
 SENSORS = {
     "character": {"name": "Character", "icon": "mdi:robot-happy-outline"},
     "emotion":   {"name": "Emotion",   "icon": "mdi:emoticon-outline"},
@@ -420,8 +429,12 @@ class HADevice:
             if reg.get("disabled_by") or reg.get("hidden_by") or reg.get("entity_category"):
                 continue
             area_id = reg.get("area_id") or devs.get(reg.get("device_id"), {}).get("area_id")
-            name = st.get("attributes", {}).get("friendly_name") or eid
-            out[eid] = f"{name} ({areas[area_id]})" if area_id in areas else name
+            attrs = st.get("attributes", {})
+            name = attrs.get("friendly_name") or eid
+            # say what it IS, so "the plug" finds a switch HA knows is an outlet
+            kind = KINDS.get((eid.split(".", 1)[0], attrs.get("device_class")),
+                             KINDS.get((eid.split(".", 1)[0], None), eid.split(".", 1)[0]))
+            out[eid] = f"{name} - {kind}" + (f", in {areas[area_id]}" if area_id in areas else "")
             dev_id = reg.get("device_id")
             dev_name = (devs.get(dev_id, {}).get("name_by_user")
                         or devs.get(dev_id, {}).get("name") or name)
