@@ -216,15 +216,23 @@ tts.speak(reply_text, character_id="marvin_v1")   # blocks until playback finish
 audio, sample_rate = tts.synthesize(reply_text, "baymax_v1")  # or get the audio instead
 ```
 
-**Character voices** live in `voices.json`, keyed by LLM1's `character_id`. Current picks are
-placeholders to be tuned by ear:
+**Character voices** live in `voices.json`, keyed by LLM1's `character_id`:
 
-| Character | Voice | Speed (`length_scale`) | Why |
-|---|---|---|---|
-| Baymax | `en_US-ryan-medium` | 1.2 (slower) | "soft, slow, reassuring" |
-| Marvin | `en_GB-alan-medium` | 0.9 (faster) | "dry, deadpan, direct" |
-| R2-D2 | `en_US-lessac-medium` | 1.0 | placeholder — R2-D2 is meant to chirp, not talk |
-| anyone else | `en_US-lessac-medium` | from extraversion: Low 1.15 / Medium 1.0 / High 0.9 | generated characters |
+| Character | Voice | `length_scale` | Measured rate | Why |
+|---|---|---|---|---|
+| Baymax (E Low) | `en_US-ryan-medium` | 1.35 | ~183 wpm | "soft, slow, reassuring" |
+| R2-D2 (E Medium) | `en_US-lessac-medium` | 0.85 | ~198 wpm | placeholder — R2-D2 is meant to chirp, not talk |
+| Marvin (E High) | `en_GB-alan-medium` | 0.66 | ~213 wpm | "dry, deadpan, direct" |
+| anyone else | `en_US-lessac-medium` | from extraversion: Low 0.98 / Medium 0.85 / High 0.77 | ~181 / ~198 / ~216 wpm | generated characters |
+
+**The speeds are calibrated, not guessed.** Each Piper voice has its own natural pace and reacts
+to `length_scale` differently (`ryan` is fast and barely slows down; `alan` is slow), so the same
+`length_scale` gives very different rates. The first hand-picked values (Baymax 1.2, Marvin 0.9)
+actually made Baymax ~25% *faster* than Marvin — the opposite of the design. The values above were
+found by synthesizing 24 real LLM2 replies (local Gemma 4 E4B, all three characters) three times
+each and measuring words per minute, targeting the rates Nass & Lee (2001) used for synthetic
+introvert (184 wpm) and extrovert (216 wpm) voices, with 200 wpm in between. Re-measure if you
+change a voice.
 
 Speaking rate follows extraversion because rate is one of the main vocal cues people use to
 perceive extraversion in synthetic speech; Piper has no pitch control, so voice choice + rate
