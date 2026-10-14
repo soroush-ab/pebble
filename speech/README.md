@@ -218,21 +218,26 @@ audio, sample_rate = tts.synthesize(reply_text, "baymax_v1")  # or get the audio
 
 **Character voices** live in `voices.json`, keyed by LLM1's `character_id`:
 
-| Character | Voice | `length_scale` | Measured rate | Why |
-|---|---|---|---|---|
-| Baymax (E Low) | `en_US-ryan-medium` | 1.35 | ~183 wpm | "soft, slow, reassuring" |
-| R2-D2 (E Medium) | `en_US-lessac-medium` | 0.85 | ~198 wpm | placeholder — R2-D2 is meant to chirp, not talk |
-| Marvin (E High) | `en_GB-alan-medium` | 0.66 | ~213 wpm | "dry, deadpan, direct" |
-| anyone else | `en_US-lessac-medium` | from extraversion: Low 0.98 / Medium 0.85 / High 0.77 | ~181 / ~198 / ~216 wpm | generated characters |
+| Character | Voice | `length_scale` | Articulation rate | Relative (Marvin = 216) | Why |
+|---|---|---|---|---|---|
+| Baymax (E Low) | `en_US-ryan-medium` | 1.26 | ~5.0 syl/s | 184 | "soft, slow, reassuring" |
+| R2-D2 (E Medium) | `en_US-lessac-medium` | 1.0 | ~5.5 syl/s | 202 | placeholder — R2-D2 is meant to chirp, not talk |
+| Marvin (E High) | `en_GB-alan-medium` | 0.66 | ~5.9 syl/s | 216 | "dry, deadpan, direct" |
+| anyone else | `en_US-lessac-medium` | from extraversion: Low 1.15 / Medium 1.0 / High 0.83 | ~5.0 / 5.5 / 5.9 syl/s | 184 / 202 / 216 | generated characters |
 
 **The speeds are calibrated, not guessed.** Each Piper voice has its own natural pace and reacts
-to `length_scale` differently (`ryan` is fast and barely slows down; `alan` is slow), so the same
-`length_scale` gives very different rates. The first hand-picked values (Baymax 1.2, Marvin 0.9)
-actually made Baymax ~25% *faster* than Marvin — the opposite of the design. The values above were
-found by synthesizing 24 real LLM2 replies (local Gemma 4 E4B, all three characters) three times
-each and measuring words per minute, targeting the rates Nass & Lee (2001) used for synthetic
-introvert (184 wpm) and extrovert (216 wpm) voices, with 200 wpm in between. Re-measure if you
-change a voice.
+to `length_scale` differently (`ryan` is fast, `alan` is slow and pauses longer between
+sentences), so the same `length_scale` gives very different speeds. The first hand-picked values
+(Baymax 1.2, Marvin 0.9) made Baymax articulate ~16% *faster* than Marvin — the opposite of the
+design.
+
+Method: the 24 real LLM2 replies of all three characters (local Gemma 4 E4B) were synthesized 3-4
+times per voice per `length_scale`; for each reply the articulation rate is syllables per second
+of speech with silent frames removed, and the median over replies is the voice's rate. (Words per
+minute including pauses was tried first and is unreliable: it swings with sentence length and with
+each voice's pause length.) The values keep the ratio Nass & Lee (2001) used for synthetic
+introvert : in-between : extrovert voices, 184 : 200 : 216 wpm, anchored on Marvin. Re-measure if
+you change a voice.
 
 Speaking rate follows extraversion because rate is one of the main vocal cues people use to
 perceive extraversion in synthetic speech; Piper has no pitch control, so voice choice + rate
