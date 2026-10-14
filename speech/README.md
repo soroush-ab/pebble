@@ -216,15 +216,28 @@ tts.speak(reply_text, character_id="marvin_v1")   # blocks until playback finish
 audio, sample_rate = tts.synthesize(reply_text, "baymax_v1")  # or get the audio instead
 ```
 
-**Character voices** live in `voices.json`, keyed by LLM1's `character_id`. Current picks are
-placeholders to be tuned by ear:
+**Character voices** live in `voices.json`, keyed by LLM1's `character_id`:
 
-| Character | Voice | Speed (`length_scale`) | Why |
-|---|---|---|---|
-| Baymax | `en_US-ryan-medium` | 1.2 (slower) | "soft, slow, reassuring" |
-| Marvin | `en_GB-alan-medium` | 0.9 (faster) | "dry, deadpan, direct" |
-| R2-D2 | `en_US-lessac-medium` | 1.0 | placeholder — R2-D2 is meant to chirp, not talk |
-| anyone else | `en_US-lessac-medium` | from extraversion: Low 1.15 / Medium 1.0 / High 0.9 | generated characters |
+| Character | Voice | `length_scale` | Articulation rate | Relative (Marvin = 216) | Why |
+|---|---|---|---|---|---|
+| Baymax (E Low) | `en_US-ryan-medium` | 1.26 | ~5.0 syl/s | 184 | "soft, slow, reassuring" |
+| R2-D2 (E Medium) | `en_US-lessac-medium` | 1.0 | ~5.5 syl/s | 202 | placeholder — R2-D2 is meant to chirp, not talk |
+| Marvin (E High) | `en_GB-alan-medium` | 0.66 | ~5.9 syl/s | 216 | "dry, deadpan, direct" |
+| anyone else | `en_US-lessac-medium` | from extraversion: Low 1.15 / Medium 1.0 / High 0.83 | ~5.0 / 5.5 / 5.9 syl/s | 184 / 202 / 216 | generated characters |
+
+**The speeds are calibrated, not guessed.** Each Piper voice has its own natural pace and reacts
+to `length_scale` differently (`ryan` is fast, `alan` is slow and pauses longer between
+sentences), so the same `length_scale` gives very different speeds. The first hand-picked values
+(Baymax 1.2, Marvin 0.9) made Baymax articulate ~16% *faster* than Marvin — the opposite of the
+design.
+
+Method: the 24 real LLM2 replies of all three characters (local Gemma 4 E4B) were synthesized 3-4
+times per voice per `length_scale`; for each reply the articulation rate is syllables per second
+of speech with silent frames removed, and the median over replies is the voice's rate. (Words per
+minute including pauses was tried first and is unreliable: it swings with sentence length and with
+each voice's pause length.) The values keep the ratio Nass & Lee (2001) used for synthetic
+introvert : in-between : extrovert voices, 184 : 200 : 216 wpm, anchored on Marvin. Re-measure if
+you change a voice.
 
 Speaking rate follows extraversion because rate is one of the main vocal cues people use to
 perceive extraversion in synthetic speech; Piper has no pitch control, so voice choice + rate

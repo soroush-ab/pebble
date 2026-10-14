@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-character TTS voice. Keys are LLM1 character_id values. voice = Piper voice name (https://huggingface.co/rhasspy/piper-voices), downloaded into models/ on first use. length_scale > 1 speaks slower, < 1 faster. Characters not listed here use 'default', with speed adjusted by their OCEAN extraversion if given. arousal_rate: LLM2's Russell-circumplex arousal (-1 sleepy .. +1 excited) scales the pace: length_scale x (1 - arousal_rate x arousal).",
+  "_comment": "Per-character TTS voice. Keys are LLM1 character_id values. voice = Piper voice name (https://huggingface.co/rhasspy/piper-voices), downloaded into models/ on first use. length_scale > 1 speaks slower, < 1 faster. Each voice has its own natural pace, so values are calibrated per voice so articulation rates (syllables/s, pauses excluded) keep the ratio Nass & Lee (2001) used for introvert : extrovert synthetic voices (184 : 216 wpm, 200 between) — see README. Characters not listed here use 'default', with speed adjusted by their OCEAN extraversion if given. arousal_rate: LLM2's Russell-circumplex arousal (-1 sleepy .. +1 excited) scales the pace: length_scale x (1 - arousal_rate x arousal).",
   "default": {
     "voice": "en_US-lessac-medium",
     "length_scale": 1.0
@@ -7,11 +7,11 @@
   "characters": {
     "baymax_v1": {
       "voice": "en_US-ryan-medium",
-      "length_scale": 1.2
+      "length_scale": 1.26
     },
     "marvin_v1": {
       "voice": "en_GB-alan-medium",
-      "length_scale": 0.9
+      "length_scale": 0.66
     },
     "r2d2_v1": {
       "voice": "en_US-lessac-medium",
@@ -21,7 +21,7 @@
   "extraversion_length_scale": {
     "Low": 1.15,
     "Medium": 1.0,
-    "High": 0.9
+    "High": 0.83
   },
   "arousal_rate": 0.2
 }
