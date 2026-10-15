@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pebble Showcase</title>
+<style>
+  :root {
+    --bg: #0f1318; --panel: #181e26; --ink: #eef2f6; --muted: #93a1b3; --line: #2a3340;
+    --accent: #5b8ff0; --chip: #8FD4E8;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #f5f6f8; --panel: #ffffff; --ink: #18202a; --muted: #5d6b7c; --line: #dce1e7; --accent: #2f6fde; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 22px 16px 40px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 24px; margin: 0; }
+  .status { font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .status.ok::before { content: "●"; color: #4fbf7f; margin-right: 6px; }
+  .status.bad::before { content: "●"; color: #e0a84a; margin-right: 6px; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+           padding: 22px 26px; margin-bottom: 18px; display: flex; align-items: center; gap: 22px; min-height: 120px; }
+  .stage .dot { width: 56px; height: 56px; border-radius: 50%; background: var(--chip); flex: none;
+                box-shadow: 0 0 0 6px color-mix(in srgb, var(--chip) 25%, transparent); }
+  .stage .now { font-size: 40px; font-weight: 700; letter-spacing: -.01em; }
+  .stage .what { color: var(--muted); font-size: 18px; margin-top: 4px; }
+
+  .chars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .chars button { display: flex; align-items: center; gap: 12px; justify-content: center; font-size: 20px; font-weight: 650; padding: 16px; }
+  .chars i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
+
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin-bottom: 18px; }
+  section h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 14px; color: var(--muted); font-size: 15px; }
+  .bar label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .moves { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+  button { font: inherit; color: var(--ink); background: transparent; border: 1px solid var(--line);
+           border-radius: 12px; padding: 14px 12px; cursor: pointer; text-align: center; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+  .grid button b { display: block; font-size: 18px; }
+  .grid button small { display: block; color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .moves button { text-align: left; }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; padding: 12px 18px; }
+  .cmp { display: grid; gap: 8px; align-items: stretch; }
+  .cmp .head { font-weight: 650; display: flex; align-items: center; gap: 8px; justify-content: center; padding: 4px 0 2px; }
+  .cmp .head i, .cell i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+  .cmp .row { display: flex; flex-direction: column; justify-content: center; padding-right: 6px; }
+  .cmp .row b { font-size: 18px; }
+  .cmp .row small { color: var(--muted); font-size: 13px; }
+  .cell { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 8px; font-weight: 550; }
+  .twin { width: 100%; height: 62vh; border: 1px solid var(--line); border-radius: 16px; margin-bottom: 18px; background: #000; }
+  @media (max-width: 640px) { .chars { grid-template-columns: 1fr; } .stage .now { font-size: 30px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Pebble showcase</h1>
+    <span id="conn" class="status bad">connecting</span>
+  </header>
+
+  <div class="stage">
+    <div class="dot" id="dot"></div>
+    <div><div class="now" id="now">Pebble</div><div class="what" id="what">One click: emotion or movement × character.</div></div>
+  </div>
+
+
+  <iframe id="twin" class="twin" hidden title="3D digital twin"></iframe>
+
+  <section>
+    <h2>Emotions (Russell valence × arousal)</h2>
+    <div class="bar">
+      <label><input type="radio" name="lvl" value="strong" checked> strong</label>
+      <label><input type="radio" name="lvl" value="mild"> mild</label>
+      <label><input type="checkbox" id="withMotion" checked> with head movement</label>
+      <span style="flex:1"></span>
+      <button id="tour" class="primary">▶ Play tour</button>
+    </div>
+    <div class="cmp" id="emotions"></div>
+  </section>
+
+  <section>
+    <h2>Movements</h2>
+    <div class="cmp" id="moves"></div>
+  </section>
+
+  <div class="bar">
+    <label><input type="checkbox" id="showTwin"> show the 3D twin on this page</label>
+    <span style="flex:1"></span>
+    <button id="rest">Back to rest</button>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const NAMES = { neutral: 'Neutral', happy: 'Happy', excited: 'Excited', tense: 'Tense', sad: 'Sad', sleepy: 'Sleepy', calm: 'Calm' };
+let cfg, ws, char = null, touring = false;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/viewer`);
+  ws.onopen = () => { $('conn').textContent = 'connected'; $('conn').className = 'status ok'; };
+  ws.onclose = () => { $('conn').textContent = 'reconnecting'; $('conn').className = 'status bad'; setTimeout(connect, 1500); };
+  ws.onmessage = e => {                     // follow shell changes made elsewhere (RFID, viewer)
+    const f = JSON.parse(e.data);
+    if (f.type === 'frame' && f.character && f.character !== char) {
+      char = f.character;
+      const c = cfg.characters.find(x => x.id === char);
+      if (c) document.documentElement.style.setProperty('--chip', c.colour);
+    }
+  };
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+
+function caption(now, what) { $('now').textContent = now; $('what').textContent = what || ''; }
+
+function setChar(id) {
+  const c = cfg.characters.find(x => x.id === id);
+  document.documentElement.style.setProperty('--chip', c ? c.colour : '#8FD4E8');
+  if (id !== char) send({ type: 'shell', id });     // only swap when it changes
+  char = id;
+  return c;
+}
+
+function mark(cell) {
+  for (const b of document.querySelectorAll('.cell')) b.classList.toggle('on', b === cell);
+}
+
+function showEmotion(name, charId, cell) {
+  const c = setChar(charId);
+  const lvl = name === 'neutral' ? 'none' : document.querySelector('input[name=lvl]:checked').value;
+  const s = cfg.emotions.find(e => e.emotion === name && e.intensity === lvl);
+  const motion = $('withMotion').checked;
+  send({ type: 'show_affect', valence: s.valence, arousal: s.arousal, motion });
+  mark(cell);
+  caption(`${NAMES[name]}${lvl === 'mild' ? ' (mild)' : ''} · ${c.name}`,
+          `valence ${s.valence >= 0 ? '+' : ''}${s.valence.toFixed(2)}, arousal ${s.arousal >= 0 ? '+' : ''}${s.arousal.toFixed(2)}`
+          + (motion ? ` · ${cfg.emotion_motion[name].replace(/_/g, ' ')}` : '')
+          + ` · ${c.name} moves at speed × ${c.profile.speed_scale}, amplitude × ${c.profile.amplitude_scale}`);
+}
+
+function playMove(m, charId, cell) {
+  const c = setChar(charId);
+  send({ type: 'play', id: m.id });
+  mark(cell);
+  caption(`${m.id.replace(/_/g, ' ')} · ${c.name}`, m.description);
+}
+
+function cellAt(grid, row, charId) {
+  return $(grid).querySelector(`.cell[data-row="${row}"][data-char="${charId}"]`);
+}
+
+async function tour() {
+  if (touring) { touring = false; return; }
+  touring = true; $('tour').textContent = '■ Stop tour';
+  for (const name of ['happy', 'excited', 'tense', 'sad', 'sleepy', 'calm', 'neutral']) {
+    for (const c of cfg.characters) {             // same feeling, each character in turn
+      if (!touring) break;
+      showEmotion(name, c.id, cellAt('emotions', name, c.id));
+      await sleep(name === 'sleepy' || name === 'calm' || name === 'sad' ? 6500 : 4500);
+    }
+  }
+  touring = false; $('tour').textContent = '▶ Play tour';
+  rest();
+}
+
+function rest() {
+  send({ type: 'show_affect', valence: 0, arousal: 0, motion: false });
+  mark(null);
+  caption((cfg.characters.find(c => c.id === char) || {}).name || 'Pebble', 'At rest.');
+}
+
+function grid(el, rows, onClick) {
+  // first column: what it is; then one button per character
+  el.style.gridTemplateColumns = `minmax(150px, 1.3fr) repeat(${cfg.characters.length}, 1fr)`;
+  let html = '<div></div>' + cfg.characters.map(c =>
+    `<div class="head"><i style="background:${c.colour}"></i>${c.name}</div>`).join('');
+  for (const r of rows) {
+    html += `<div class="row"><b>${r.label}</b><small>${r.sub}</small></div>`;
+    html += cfg.characters.map(c =>
+      `<button class="cell" data-row="${r.id}" data-char="${c.id}"><i style="background:${c.colour}"></i>${r.short || r.label}</button>`).join('');
+  }
+  el.innerHTML = html;
+  el.onclick = e => { const b = e.target.closest('.cell'); if (b) onClick(b.dataset.row, b.dataset.char, b); };
+}
+
+async function init() {
+  cfg = await (await fetch('/showcase/config')).json();
+  const emo = ['happy', 'excited', 'tense', 'sad', 'sleepy', 'calm', 'neutral'];
+  grid($('emotions'), emo.map(n => ({ id: n, label: NAMES[n], sub: cfg.emotion_motion[n].replace(/_/g, ' ') })),
+       (row, charId, cell) => showEmotion(row, charId, cell));
+  const moves = cfg.motions.filter(m => !m.loop);
+  grid($('moves'), moves.map(m => ({ id: m.id, label: m.id.replace(/_/g, ' '), sub: m.description.split('.')[0], short: 'play' })),
+       (row, charId, cell) => playMove(moves.find(m => m.id === row), charId, cell));
+  $('tour').onclick = tour;
+  $('rest').onclick = rest;
+  $('showTwin').onchange = e => { const f = $('twin'); f.hidden = !e.target.checked; if (e.target.checked && !f.src) f.src = '/'; };
+  connect();
+}
+init();
+</script>
+</body>
+</html>

@@ -48,7 +48,7 @@ The twin's MCU logic drives the real robot (firmware in `../firmware`) through
   uploaded once per connection into the ESP32's PSRAM (~3 MB, ~10 s;
   the fitted character first, ~4 s). Afterwards only frame ids cross Wi-Fi: a
   blink is one `ANIM` command timed on the robot, so both eyes stay in step.
-  Affect snaps to the nearest of 9 Russell anchors; gaze isn't shown on the robot.
+  Affect snaps to the nearest of 13 faces (neutral + 6 emotions × mild/strong); gaze isn't shown on the robot.
 - **Neck:** head pose → linkage → servo setpoints, with per-servo sign, the
   A/B swap, a ±25° cap and a 150°/s limit from `config/robot_hw.yaml`
   (measured on the built robot). A board reboot (brownout) disables motion.
@@ -57,6 +57,15 @@ The twin's MCU logic drives the real robot (firmware in `../firmware`) through
 - Not yet: the base (not installed), RFID (reader not detected), a speaker on
   the robot (voice plays on the PC).
 
+### Showcase page (for presentations)
+
+Open **http://localhost:8730/showcase** while `twin/run.py` runs (add `--robot
+--robot-motion` to drive the real robot). Pick a character, then tap any
+emotion (eyes + motion exactly as in conversation; mild/strong; with or without
+head movement) or any movement from `motions.yaml`. A large caption names what is
+playing, for the audience. **Play tour** runs through every emotion for the
+selected character; the 3D twin can be shown on the same page.
+
 ### Emotion recognition survey
 
 ```bash
@@ -64,7 +73,8 @@ python3 twin/run.py --robot --robot-motion      # or plain twin/run.py for the s
 # open http://localhost:8730/survey on a laptop/tablet next to the robot
 ```
 
-Shows each expression (neutral + the 8 Russell octants, optionally the mild
+Shows each expression (neutral + the 6 emotions: happy, excited, tense, sad,
+sleepy, calm; optionally the mild
 versions too) in random order, exactly as the brain would show it (eyes +
 motion, `twin/expressions.py`). The participant picks what they think it is and
 how sure they are. Every finished session is saved to `survey/`:
@@ -89,7 +99,8 @@ utterances go to LLM2, and its output becomes protocol messages — `tts_text` �
 (each −1..1) rather than a word. The twin's eyes are drawn continuously from the point:
 arousal opens them and dilates the iris, pleasant valence lifts the lower lids, and
 unpleasant valence slants the brows (sad or worried when calm, tense when aroused).
-The motion is picked by octant and played faster with arousal and bigger with
+The motion is picked by emotion (6 directions on the circle; alert and depressed
+were dropped after the survey) and played faster with arousal and bigger with
 intensity; the speaking rate follows arousal; HA's `sensor.pebble_emotion` carries
 the label plus valence/arousal attributes.
 
@@ -119,6 +130,22 @@ it (shown in the twin's event log), and LLM2 answers. `--voice` speaks the reply
 with Piper in the character's voice from `../speech/voices.json`. STT
 defaults to `base.en` (~0.8 s per sentence on CPU); `--stt-model small.en-q5_1`
 is more robust in noise but ~4 s. `--audio-device` picks the mic/speaker.
+
+### Wake word (no button)
+
+```bash
+uv run --env-file ../LLM2/.env brain/llm2_brain.py --local --mic robot --voice --ha-device --wake
+```
+
+Say the fitted character's name ("Baymax", "Marvin", "R2-D2"/"Artoo") or
+"Pebble". On its own, it wakes Pebble up (attentive eyes, perk-up, "Yes?" in
+character) and the next thing you say is the request, ended by a pause. In one
+breath ("Hey Baymax, turn on the light") it goes straight through. After a reply
+you can carry on for 8 s without the name. Speech is cut into utterances by an
+adaptive-noise VAD and spotted with the same whisper used for STT
+(`brain/wake.py`); anything heard while Pebble itself is talking is ignored.
+The robot streams its mic continuously in this mode (`listen` message).
+*Hold to speak* still works alongside.
 
 ### Pebble as a Home Assistant device
 

@@ -7,7 +7,7 @@ Assistant notifications, and outputs speaker text, an emotion, and Home Assistan
 
 情绪采用 Russell 环形模型：效价 × 唤醒度，各为 -1..1（`affect.py`）。
 Emotion follows Russell's circumplex model: valence × arousal, each -1..1 (`affect.py`);
-a label (happy, excited, alert, tense, sad, depressed, sleepy, calm, neutral) is derived
+a label (happy, excited, tense, sad, sleepy, calm, neutral) is derived
 from the point's angle. Russell, J. A. (1980). A circumplex model of affect. *Journal of
 Personality and Social Psychology, 39*(6), 1161–1178.
 

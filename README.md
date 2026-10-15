@@ -80,7 +80,8 @@ uv run brain/llm2_brain.py --local --mic --voice
 ```
 
 Hold **Hold to speak** in the twin and talk; release, and the reply is spoken
-in the character's voice.
+in the character's voice. Add `--wake` to just say the character's name instead
+("Baymax, turn on the light").
 
 ### 4. Connect Home Assistant
 

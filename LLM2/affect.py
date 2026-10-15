@@ -14,15 +14,16 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-# Russell (1980) 的八个方向（角度，0° = 愉快，逆时针）
-# Russell's eight octants (degrees, 0 = pleasant, counter-clockwise)
+# Russell (1980) 环上的六个方向（角度，0° = 愉快，逆时针）
+# Six directions on Russell's circle (degrees, 0 = pleasant, counter-clockwise).
+# "alert" (90) and "depressed" (225) were dropped after the recognition survey
+# (2026-10-14): each sits between two neighbours and was mostly read as one of
+# them, so points there now take the nearest remaining label.
 OCTANTS: list[tuple[float, str]] = [
     (0.0, "happy"),      # 愉快 / pleased, glad
     (45.0, "excited"),   # 兴奋 / excited, delighted
-    (90.0, "alert"),     # 警觉 / aroused, astonished
     (135.0, "tense"),    # 紧张 / tense, distressed, angry, afraid
-    (180.0, "sad"),      # 难过 / miserable, sad
-    (225.0, "depressed"),  # 沮丧 / gloomy, bored
+    (180.0, "sad"),      # 难过 / miserable, sad, gloomy
     (270.0, "sleepy"),   # 困倦 / tired, sleepy
     (315.0, "calm"),     # 平静 / relaxed, content, serene
 ]

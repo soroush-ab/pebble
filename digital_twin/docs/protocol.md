@@ -51,6 +51,7 @@ for logging and context only.
 | `attend` | `deg` | Override gaze target |
 | `profile` | `character{}` | Push an updated/new character (LLM 1 output) |
 | `ha` | `service`, `data{}` | Home Assistant call; logged by the twin |
+| `listen` | `on` | `true`: stream the mic to the brain continuously (wake-word mode), not only while the user holds *speak*; `false`: back to push-to-talk |
 | `heard` | `text` | Transcript of brain-side STT, for display. Twin only: there the laptop mic stands in for the array |
 
 **Unknown `type` values and unknown motion ids are ignored, never fatal.** The

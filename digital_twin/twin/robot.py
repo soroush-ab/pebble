@@ -116,11 +116,12 @@ def render_eye(state, inner_on_left, bezel=True):
 # only frame ids cross Wi-Fi. Continuous affect snaps to the nearest of these
 # Russell-circumplex anchors (the same octants as LLM2/affect.py).
 def _anchors():
-    """Neutral, then every octant at a mild and a strong intensity: 17 faces."""
+    """Neutral, then every emotion direction (twin/expressions.py) at a mild and
+    a strong intensity: 13 faces."""
     import math
+    import expressions
     out = [("neutral", 0.0, 0.0)]
-    for deg, name in ((0, "happy"), (45, "excited"), (90, "alert"), (135, "tense"),
-                      (180, "sad"), (225, "depressed"), (270, "sleepy"), (315, "calm")):
+    for deg, name in expressions.OCTANTS:
         for level, r in (("mild", 0.45), ("strong", 0.9)):
             out.append((f"{level} {name}", round(r * math.cos(math.radians(deg)), 3),
                         round(r * math.sin(math.radians(deg)), 3)))
@@ -241,7 +242,7 @@ class RobotBridge:
 
     def _mic_tick(self):
         with self.mcu.lock:
-            speaking = self.mcu.speaker_active
+            speaking = self.mcu.speaker_active or self.mcu.listen_always
         now = time.time()
         if speaking and not self._mic_on:
             self._mic_on, self._mic_off_at = True, None

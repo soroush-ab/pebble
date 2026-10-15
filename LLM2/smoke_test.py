@@ -17,7 +17,7 @@ import sys
 import httpx
 
 # Russell 环形模型的标签（见 affect.py）/ Russell circumplex labels (see affect.py)
-EMOTIONS = {"neutral", "happy", "excited", "alert", "tense", "sad", "depressed", "sleepy", "calm"}
+EMOTIONS = {"neutral", "happy", "excited", "tense", "sad", "sleepy", "calm"}
 
 
 def _unit(x) -> bool:

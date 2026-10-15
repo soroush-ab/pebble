@@ -78,6 +78,7 @@ class PebbleMCU:
         self.speaker_deg = 35.0
         self.speaker_dist = 2.0
         self.speaker_active = False
+        self.listen_always = False       # brain asked for the mic all the time (wake word)
 
         # robot state
         self.character = None
@@ -282,6 +283,10 @@ class PebbleMCU:
                     self.log("profile", f"{cid} updated by brain")
             elif kind == "ha":
                 self.log("ha", f"{msg.get('service')} {json.dumps(msg.get('data', {}))}")
+            elif kind == "listen":
+                # wake-word mode: stream the mic continuously, not only on "Hold to speak"
+                self.listen_always = bool(msg.get("on"))
+                self.log("brain", "always listening" if self.listen_always else "push-to-talk")
             elif kind == "heard":
                 # brain-side STT (twin only: the real MCU transcribes locally)
                 self.log("user", msg.get("text", "")[:70])

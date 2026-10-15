@@ -108,6 +108,20 @@ class Handler(BaseHTTPRequestHandler):
                 "characters": [{"id": c["character_id"], "name": c["display_name"]}
                                for c in m.characters.values()],
             }).encode())
+        if path == "/showcase":
+            path = "/showcase.html"
+        if path == "/showcase/config":
+            return self._send(200, "application/json", json.dumps({
+                "characters": [{"id": c["character_id"], "name": c["display_name"],
+                                "colour": c["eye_style"]["colour"],
+                                "profile": c["motion_profile"]}
+                               for c in m.characters.values()],
+                "emotions": expressions.stimuli(include_mild=True),
+                "emotion_motion": expressions.OCTANT_MOTION,
+                "motions": [{"id": k, "description": " ".join(str(v.get("description", "")).split()),
+                             "loop": bool(v.get("loop"))}
+                            for k, v in sorted(m.motions.items()) if not v.get("parametric")],
+            }).encode())
         if path.startswith("/survey/") and path.endswith(".csv"):
             f = os.path.join(survey.DIR, os.path.basename(path))
             if not os.path.isfile(f):

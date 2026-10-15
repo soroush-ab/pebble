@@ -117,6 +117,11 @@ class HADevice:
                 if st and st["state"] not in ("unknown", "unavailable"):
                     unit = st["attributes"].get("unit_of_measurement") or ""
                     extra.append(f"{label} {st['state']} {unit}".strip())
+            attrs = now[eid].get("attributes", {})
+            if eid.startswith("light.") and now[eid]["state"] == "on" \
+                    and attrs.get("brightness") is not None:
+                # without this the model guesses ("already at full brightness")
+                extra.insert(0, f"brightness {round(100 * attrs['brightness'] / 255)}%")
             out[eid] = now[eid]["state"] + (f" ({', '.join(extra)})" if extra else "")
         return out
 

@@ -65,9 +65,11 @@ sys.path.insert(0, str(ROOT / "twin"))
 sys.path.insert(0, str(PEBBLE / "LLM2"))
 
 import expressions  # noqa: E402
+import wake  # noqa: E402
 import ws  # noqa: E402
 from adapters import Face, HomeAssistantClient, Speaker  # noqa: E402
 from pipeline import LLM2Pipeline, NoActiveCharacter  # noqa: E402
+from affect import Affect  # noqa: E402
 from schemas import LLM2Input  # noqa: E402
 from settings import load_settings  # noqa: E402
 
@@ -86,6 +88,12 @@ GESTURE_HINTS = {
     "droop": "sad droop", "sag": "gloomy sag", "doze": "nod off sleepily",
     "sway": "calm, gentle sway",
 }
+
+# What each character says when woken by its name (wake word, --wake).
+# Kept very short: anything said while the robot talks is ignored (echo guard),
+# so a long acknowledgement would eat the start of the request.
+WAKE_ACK = {"baymax": "Yes?", "marvin": "What?", "r2d2": "Beep?"}
+
 
 def affect_actions(affect):
     """Russell point -> (eyes message, motion message). The mapping is shared with
@@ -129,16 +137,22 @@ class TwinSpeaker(Speaker):
 
     def __init__(self, link, piper=None):
         self.link, self.piper = link, piper
+        self.on_speak = None            # callback(start, end): the robot is talking then
 
     def speak(self, text, affect):
         if self.piper is None:
-            self.link.send({"type": "say", "text": text, "dur_ms": int(55 * len(text))})
+            dur = 0.055 * len(text)
+            if self.on_speak:
+                self.on_speak(time.time(), time.time() + dur)
+            self.link.send({"type": "say", "text": text, "dur_ms": int(1000 * dur)})
             return
         from audio_io import play
         character_id, extraversion = self.piper._active_voice()
         audio, rate = self.piper.tts.synthesize(text, character_id, extraversion,
                                                 affect.arousal)
         self.link.send({"type": "say", "text": text, "dur_ms": int(1000 * len(audio) / rate)})
+        if self.on_speak:
+            self.on_speak(time.time(), time.time() + len(audio) / rate)
         play(audio, rate, self.piper.device)
 
 
@@ -262,7 +276,13 @@ class TwinHA(HomeAssistantClient):
                         data[k] = json.loads(v.replace("'", '"'))
                     except ValueError:
                         return None
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        # small models quote numbers ({"brightness_pct": "20"}); HA wants numbers
+        for k, v in data.items():
+            if isinstance(v, str) and re.fullmatch(r"-?\d+(\.\d+)?", v.strip()):
+                data[k] = float(v) if "." in v else int(v)
+        return data
 
     def execute(self, action):
         if action.service == "todo.update_item" and self.device is not None:
@@ -516,7 +536,9 @@ class Pipeline(LLM2Pipeline):
         "action: e.g. light.turn_off now, then light.turn_on with {\"delay_s\": 5}. "
         "Only say something will happen later if you emitted the delayed action."
         "\nIf you asked the user to confirm something and they agree (yes, sure, ok, "
-        "please, go ahead), do it now: emit that action in this reply.")
+        "please, go ahead), do it now: emit that action in this reply."
+        "\nLight brightness: light.turn_on with data_json {\"brightness_pct\": 0-100} "
+        "(full = 100, dim = 20). Current brightness is in the device states.")
 
     reminder_list = None        # where Pebble may add reminders (None: it can't)
 
@@ -546,6 +568,32 @@ class Pipeline(LLM2Pipeline):
                       f"Gestures: {listed}. Do one when asked to move, or to underline a reply.")
         return rules
 
+    # "I've set the light to full brightness" with no ha_action: a small model
+    # breaks the prompt's "never claim an action you did not emit" rule.
+    CLAIM = re.compile(r"\b(i(?:'ve| have| will| am|'m|'ll)?\s+(?:now\s+)?(?:turn(?:ed|ing)?|"
+                       r"switch(?:ed|ing)?|set(?:ting)?|dimm?(?:ed|ing)?|brighten(?:ed|ing)?|"
+                       r"chang(?:ed|ing)|adjust(?:ed|ing)?|added|remind(?:ed)?))\b", re.I)
+
+    @classmethod
+    def claims(cls, text):
+        """A statement (not a question: "Shall I turn it on?" must stay a question)."""
+        return any(cls.CLAIM.search(sent) for sent in re.findall(r"[^.!?]+[.!]?", text)
+                   if not sent.rstrip().endswith("?") and not re.search(
+                       re.escape(sent.strip()) + r"\s*\?", text))
+
+    def _infer(self, event):
+        out, raw = super()._infer(event)
+        if (event.source == "stt" and not out.ha_actions and self.claims(out.tts_text)
+                and self.ha_entities):
+            log.info("reply claims an action it did not emit; asking again: %r", out.tts_text)
+            retry = event.model_copy(update={"text": event.text + (
+                "\n(Your draft reply said you would change a device but had no ha_actions."
+                " Either include the ha_action that does it, or do not claim it.)")})
+            out2, raw2 = super()._infer(retry)
+            if out2.ha_actions or not self.claims(out2.tts_text):
+                return out2, raw2
+        return out, raw
+
     def _dispatch(self, out):
         """Gestures play WITH the reply (LLM2 runs actions after speaking), and
         replace the motion the emotion would have picked."""
@@ -573,7 +621,8 @@ class Pipeline(LLM2Pipeline):
             self._system_prompt += self.body_rules()
             if self.reply_language:
                 self._system_prompt += (f"\nAlways write tts_text in {self.reply_language}, "
-                                        f"in one or two short spoken sentences.")
+                                        f"in one or two short spoken sentences. Write the "
+                                        f"JSON compactly on a single line.")
             if self.state_source or self.reminder_source:
                 self._system_prompt += self.GROUNDING
             self._system_prompt += self.HA_RULES
@@ -605,6 +654,9 @@ def main():
                     help='speech input while "Hold to speak" is held: this machine\'s '
                          'mic (default), or "robot" for the robot\'s own mic, streamed '
                          "by the robot as binary frames")
+    ap.add_argument("--wake", action="store_true",
+                    help="wake word: say the character's name (or 'Pebble') instead of "
+                         "holding 'Hold to speak' (needs --mic)")
     ap.add_argument("--audio-device", help="mic/speaker index or name (see "
                                            "`python -m sounddevice`)")
     # base.en: 0.8 s per sentence on this laptop's CPU vs 4.1 s for small.en,
@@ -638,6 +690,7 @@ def main():
     link = Link()
 
     piper = stt = mic = None
+    stt_models = []                          # every whisper model, for vocabulary priming
     if args.voice or args.mic:
         sys.path.insert(0, str(PEBBLE / "speech"))
     if args.voice:
@@ -648,6 +701,7 @@ def main():
         mic = RobotMic() if args.mic == "robot" else MicRecorder(args.audio_device)
         print("loading whisper (first run downloads it into ../speech/models) ...")
         stt = SpeechToText(args.stt_model, n_threads=min(8, os.cpu_count() or 1))
+        stt_models.append(stt)
         print(f"  STT {stt.model_name}, mic at {mic.rate} Hz")
 
     device = None
@@ -714,6 +768,8 @@ def main():
                 print(f"  -> [{out.affect}] {(time.time() - t0) * 1000:.0f} ms  "
                       f"\"{out.tts_text[:60]}\"  ha={len(out.ha_actions)}"
                       + (f" ({pipe.ha.failed} FAILED)" if pipe.ha.failed else ""))
+                if waker and source == "stt":      # carry on talking without the name
+                    waker.replied()
                 if pipe.ha.failed:              # it may have said "done"; show it wasn't
                     link.send({"type": "eyes", "expression": "concerned"})
                     link.send({"type": "motion", "id": "shake_no"})
@@ -725,6 +781,122 @@ def main():
                 link.send({"type": "motion", "id": "shake_no"})
 
     threading.Thread(target=worker, daemon=True).start()
+
+    # ---- wake word: listen all the time, react to the character's name ----
+    # Fast path for the NAME (whisper tiny.en, ~0.45 s, and an early look 1 s
+    # into long utterances so the robot reacts while you are still talking);
+    # base.en (~1.2 s) only for the request itself. Runs in its own thread so
+    # hearing never waits behind the LLM or the robot speaking.
+    waker = wake_feed = None
+    if args.wake:
+        if mic is None:
+            sys.exit("--wake needs --mic (laptop) or --mic robot")
+        from stt import SpeechToText
+        waker = wake.WakeController()
+        pipe.speaker.on_speak = waker.robot_speaking
+        stt_fast = SpeechToText("tiny.en-q5_1", n_threads=min(8, os.cpu_count() or 1))
+        stt_models.append(stt_fast)
+        segmenter = wake.Segmenter(mic.rate)
+        audio_q, seg_q = queue.Queue(), queue.Queue()
+        acks = {}                                   # character -> pre-rendered "Yes?"
+
+        def segments():
+            while True:
+                for item in segmenter.feed(audio_q.get()):
+                    seg_q.put(item)
+
+        def ack_audio(key):
+            if piper is None:
+                return None
+            if key not in acks:
+                cid = pipe.active.character_id if pipe.active else None
+                acks[key] = piper.tts.synthesize(WAKE_ACK.get(key, "Yes?"), cid, None, 0.3)
+            return acks[key]
+
+        def wake_up(heard, visual=True, voice=True):
+            print(f'  wake: "{heard}"')
+            if visual:
+                link.send({"type": "eyes", "expression": "attentive",
+                           "valence": 0.2, "arousal": 0.5})
+                link.send({"type": "motion", "id": "perk_up"})
+            clip = ack_audio(wake_key()) if voice else None
+            if clip is not None:
+                from audio_io import play
+                audio, rate = clip
+                waker.robot_speaking(time.time(), time.time() + len(audio) / rate)
+                threading.Thread(target=play, args=(audio, rate, piper.device),
+                                 daemon=True).start()
+
+        def listen():
+            woke_early = None                       # t_start of the utterance that woke us
+            while True:
+                kind, audio, t_a, t_b = seg_q.get()
+                if time.time() - t_b > 8 or waker.heard_robot(t_a, t_b):
+                    continue                        # stale, or the robot's own voice
+                if kind == "partial":
+                    if waker.state == "idle":
+                        quick = stt_fast.transcribe(audio, mic.rate)
+                        if wake.match(quick, wake_aliases()) is not None:
+                            waker.state, waker.until = "awake", time.time() + waker.AWAKE_S
+                            woke_early = t_a
+                            wake_up(quick, voice=False)   # react now; voice only if it was just the name
+                    continue
+                t0 = time.time()
+                if waker.state == "idle":
+                    quick = stt_fast.transcribe(audio, mic.rate)
+                    if wake.match(quick, wake_aliases()) is None:
+                        print(f'  (not for me) "{quick}"')
+                        continue
+                heard = stt.transcribe(audio, mic.rate)   # accurate, for the request
+                if not heard:
+                    continue
+                early = woke_early == t_a
+                if early:
+                    waker.state = "idle"            # judge the whole utterance afresh
+                act, req = waker.on_text(heard, wake_aliases())
+                if act == "ignore":
+                    print(f'  (not for me) "{heard}"')
+                elif act == "wake":
+                    wake_up(heard, visual=not early)
+                else:
+                    print(f'  heard: "{heard}" -> request "{req}"  '
+                          f'({(time.time() - t0) * 1000:.0f} ms STT)')
+                    link.send({"type": "heard", "text": heard})
+                    link.send({"type": "eyes", "expression": "attentive"})
+                    jobs.put(("stt", req))
+
+        threading.Thread(target=segments, daemon=True, name="wake-vad").start()
+        threading.Thread(target=listen, daemon=True, name="wake-listen").start()
+        wake_feed = audio_q.put
+
+        def sleep_again():                       # awake but nothing said: go idle
+            while True:
+                time.sleep(0.5)
+                if waker.state == "awake" and time.time() > waker.until:
+                    waker.state = "idle"
+                    link.send({"type": "eyes", "expression": "neutral"})
+                    print("  (no request; back to waiting for the name)")
+
+        threading.Thread(target=sleep_again, daemon=True).start()
+        if not isinstance(mic, RobotMic):        # laptop mic: one always-on stream
+            import sounddevice as sd
+
+            def on_audio(indata, frames, time_info, status):
+                if mic.stream is None:           # not while Hold-to-speak records
+                    wake_feed(indata[:, 0].copy())
+
+            listen_stream = sd.InputStream(samplerate=mic.rate, channels=1, dtype="float32",
+                                           device=mic.device, callback=on_audio)
+            listen_stream.start()
+        print("  wake word on: say the character's name (or 'Pebble')")
+
+    def wake_key():
+        cid = pipe.active.character_id if pipe.active else ""
+        return re.sub(r"_v\d+$", "", cid).replace("-", "").replace("_", "")
+
+    def wake_aliases():
+        name = pipe.active.profile.display_name if pipe.active else ""
+        return wake.ALIASES.get(wake_key(), [wake.normalise(name)]) + wake.UNIVERSAL
 
     def notifications():
         for line in sys.stdin:
@@ -767,10 +939,12 @@ def main():
             names.add(" ".join(re.sub(r"[^\w&']", " ", name).split()))
             if room:
                 rooms.add(room)
-        prompt = "Talking to Pebble, a home robot. Devices: " + ", ".join(sorted(names)) + "."
+        prompt = ("Talking to Pebble, a home robot, also called Baymax, Marvin or R2-D2. "
+                  "Devices: " + ", ".join(sorted(names)) + ".")
         if rooms:
             prompt += " Rooms: " + ", ".join(sorted(rooms)) + "."
-        stt._model._set_params({"initial_prompt": prompt})
+        for model in stt_models:
+            model._model._set_params({"initial_prompt": prompt})
         log.info("STT primed: %s", prompt)
 
     prime_stt()
@@ -792,6 +966,8 @@ def main():
             device.update_sensor("character", c.profile.display_name)
         if piper:
             jobs.put(("warm", c.character_id))
+            if waker:
+                acks.pop(wake_key(), None)       # re-render "Yes?" in the new voice
 
     print(f"LLM2 model {settings.openai_model} · db {settings.db_path} · "
           f"HA {'dry-run' if settings.ha_dry_run else settings.ha_base_url} · "
@@ -812,6 +988,9 @@ def main():
                 if isinstance(raw, bytes):           # audio from the robot's mic
                     if isinstance(mic, RobotMic):
                         mic.feed(raw)
+                        if wake_feed and not mic.active:
+                            import numpy as np
+                            wake_feed(np.frombuffer(raw, "<i2").astype(np.float32) / 32768)
                     continue
                 try:
                     msg = json.loads(raw)
@@ -824,6 +1003,8 @@ def main():
                     print(f"connected: fw={msg['fw']}  shell={msg.get('character_id')}")
                     Pipeline.gestures = {m: GESTURE_HINTS[m] for m in msg.get("motions", [])
                                          if m in GESTURE_HINTS}
+                    if waker and isinstance(mic, RobotMic):
+                        link.send({"type": "listen", "on": True})
                     select(msg.get("character_id"))
                 elif kind == "tag" and msg.get("present"):
                     select(msg.get("character_id"))

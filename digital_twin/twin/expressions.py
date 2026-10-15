@@ -9,16 +9,18 @@ intensity. Keeping this in one place means the recognition survey
 
 import math
 
-# Same octants and neutral radius as LLM2/affect.py.
-OCTANTS = [(0, "happy"), (45, "excited"), (90, "alert"), (135, "tense"), (180, "sad"),
-           (225, "depressed"), (270, "sleepy"), (315, "calm")]
+# Same directions and neutral radius as LLM2/affect.py. "alert" (90) and
+# "depressed" (225) were dropped after the 2026-10-14 survey: each sits between
+# two neighbours and people mostly read it as one of them.
+OCTANTS = [(0, "happy"), (45, "excited"), (135, "tense"), (180, "sad"),
+           (270, "sleepy"), (315, "calm")]
 NEUTRAL_RADIUS = 0.3
 
 # One body language per octant (motions.yaml). Tuned on the robot 2026-10-13:
 # tense uses recoil at every intensity (shake_no read as refusal, not tension).
 OCTANT_MOTION = {
     "neutral": "ack_nod", "happy": "happy_bounce", "excited": "excited_wiggle",
-    "alert": "perk_up", "tense": "recoil", "sad": "droop", "depressed": "sag",
+    "tense": "recoil", "sad": "droop",
     "sleepy": "doze", "calm": "sway",
 }
 
@@ -50,15 +52,15 @@ def actions(valence, arousal):
 
 # What participants choose from: plain words, one per octant + neutral.
 CHOICES = [
-    ("happy", "Happy"), ("excited", "Excited"), ("alert", "Alert / attentive"),
-    ("tense", "Tense / angry"), ("sad", "Sad"), ("depressed", "Depressed / gloomy"),
+    ("happy", "Happy"), ("excited", "Excited"),
+    ("tense", "Tense / angry"), ("sad", "Sad / gloomy"),
     ("sleepy", "Sleepy / tired"), ("calm", "Calm / relaxed"), ("neutral", "Neutral"),
 ]
 INTENSITY = {"strong": 0.9, "mild": 0.45}
 
 
 def stimuli(include_mild=False):
-    """Every expression to show: neutral + each octant (strong, optionally mild)."""
+    """Every expression to show: neutral + each direction (strong, optionally mild)."""
     out = [{"id": "neutral", "emotion": "neutral", "intensity": "none",
             "valence": 0.0, "arousal": 0.0}]
     for deg, name in OCTANTS:

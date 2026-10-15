@@ -177,19 +177,25 @@ motions:
         - {t: 0.90, pos:  0.0}
 
   perk_up:
-    description: Alert / attentive (arousal +). A quick small lift with an
-      attentive tilt, then holds still, listening.
+    description: Alert / attentive (arousal +). A quick lift, two sharp little
+      glances side to side, then frozen and poised. Survey 2026-10-14 (n=4) - the
+      smooth lift-and-hold version was recognised 25% and read as calm; quick,
+      abrupt changes are what read as high arousal.
     channels:
       head_pitch:
         - {t: 0.00, pos: 0.0}
-        - {t: 0.18, pos: 3.5}
-        - {t: 1.80, pos: 3.5}
+        - {t: 0.10, pos: 4.0}
+        - {t: 1.90, pos: 4.0}
         - {t: 2.40, pos: 0.0}
       head_roll:
-        - {t: 0.00, pos: 0.0}
-        - {t: 0.25, pos: 5.0}
-        - {t: 1.80, pos: 5.0}
-        - {t: 2.40, pos: 0.0}
+        - {t: 0.00, pos:  0.0}
+        - {t: 0.10, pos:  0.0}
+        - {t: 0.22, pos:  5.5}
+        - {t: 0.50, pos:  5.5}
+        - {t: 0.62, pos: -4.5}
+        - {t: 0.90, pos: -4.5}
+        - {t: 1.02, pos:  0.0}
+        - {t: 1.90, pos:  0.0}
     easing: ease_out
 
   recoil:
@@ -226,22 +232,20 @@ motions:
     easing: s_curve
 
   sag:
-    description: Depressed / gloomy (valence -, arousal -). A slow slump forward
-      with a small sigh, almost no sideways roll. Tuned on the robot - lolling
-      sideways read as "high", not depressed.
+    description: Depressed / gloomy (valence -, arousal -). Low energy is the
+      point - a very slow, deep slump that stays down, two tired sighs, a
+      reluctant return. Survey 2026-10-14 (n=4) - the earlier version was read as
+      sad 3 of 4 times; sad (droop) is quicker and tilts, this one barely moves.
     channels:
       head_pitch:
         - {t: 0.00, pos:  0.0}
-        - {t: 1.60, pos: -6.0}
-        - {t: 2.20, pos: -5.0}
-        - {t: 2.90, pos: -6.5}
-        - {t: 4.20, pos: -6.5}
-        - {t: 5.40, pos:  0.0}
-      head_roll:
-        - {t: 0.00, pos: 0.0}
-        - {t: 1.60, pos: 1.5}
-        - {t: 4.20, pos: 1.5}
-        - {t: 5.40, pos: 0.0}
+        - {t: 2.40, pos: -7.0}
+        - {t: 3.20, pos: -5.5}
+        - {t: 4.00, pos: -7.0}
+        - {t: 4.80, pos: -5.5}
+        - {t: 5.60, pos: -7.0}
+        - {t: 6.40, pos: -7.0}
+        - {t: 8.20, pos:  0.0}
     easing: s_curve
 
   doze:
@@ -255,17 +259,21 @@ motions:
         - {t: 3.40, pos:   0.0}
 
   sway:
-    description: Calm / content / relaxed (valence +, arousal -). A slow,
-      gentle sway.
+    description: Calm / content / relaxed (valence +, arousal -). Slow, low and
+      settled - the head sinks a little, breathes once, settles back. Survey
+      2026-10-14 (n=4) - the side-to-side sway with a slight lift was read as
+      alert 4 of 4 times (it looked like looking around).
     channels:
-      head_roll:
-        - {t: 0.00, pos:  0.0}
-        - {t: 1.20, pos:  4.0}
-        - {t: 2.60, pos: -4.0}
-        - {t: 3.60, pos:  0.0}
       head_pitch:
+        - {t: 0.00, pos:  0.0}
+        - {t: 1.80, pos: -3.0}
+        - {t: 3.00, pos: -1.8}
+        - {t: 4.20, pos: -3.0}
+        - {t: 5.60, pos:  0.0}
+      head_roll:
         - {t: 0.00, pos: 0.0}
-        - {t: 1.20, pos: 1.5}
-        - {t: 2.60, pos: 1.5}
-        - {t: 3.60, pos: 0.0}
+        - {t: 1.80, pos: 1.5}
+        - {t: 4.20, pos: 1.5}
+        - {t: 5.60, pos: 0.0}
     easing: s_curve
+
